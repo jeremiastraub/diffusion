@@ -162,6 +162,10 @@ class ScoreBasedModel(pl.LightningModule):
             "loss", loss,
             prog_bar=True, logger=True, on_step=True, on_epoch=True,
         )
+
+        if self.use_ema:
+            self.ema(self.score_model)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -204,8 +208,8 @@ class ScoreBasedModel(pl.LightningModule):
         )
 
         with torch.no_grad():
-            with self.ema_scope(verbose=True):
-                x, x_mean = sampling_fn(self.score_model)
+            # with self.ema_scope(verbose=True):
+            x, x_mean = sampling_fn(self.score_model)
 
             if self.ae_model is not None:
                 x = self.ae_model.decode(x)
@@ -215,6 +219,16 @@ class ScoreBasedModel(pl.LightningModule):
     def log_images(self, batch, **kwargs):
         """Log generated samples"""
         log = dict()
+
+        # Generate sample
         samples = self.sample()
         log["samples"] = samples
+
+        if self.ae_model is not None:
+            # Reconstruct an image using the autoencoder
+            x = self.get_input(batch, self.image_key)
+            x = x.to(self.device)
+            xrec, _ = self.ae_model(x)
+            log["reconstruction"] = xrec
+
         return log

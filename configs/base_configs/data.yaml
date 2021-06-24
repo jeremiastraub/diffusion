@@ -7,6 +7,6 @@ LSUNchurch256:
       batch_size: 16
       num_workers: 8
       train:
-        target: convae.data.lsun.LSUNChurchesTrain # 256 x 256
+        target: ncsn.data.lsun.LSUNChurchesTrain # 256 x 256
       validation:
-        target: convae.data.lsun.LSUNChurchesValidation # 256 x 256
+        target: ncsn.data.lsun.LSUNChurchesValidation # 256 x 256
