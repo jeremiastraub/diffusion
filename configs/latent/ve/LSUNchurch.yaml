@@ -1,0 +1,79 @@
+# LSUN outdoor churches
+---
+based_on:
+  - data.LSUNchurch256
+  - ae_config.convae256_16x16x16
+  - sde_config.VESDE
+  - loss_config.SDELoss
+
+#lightning:
+#  logger:
+#    target: pytorch_lightning.loggers.TestTubeLogger
+#    params:
+#      name: testtube,
+#      save_dir: logs/logthisshit
+
+#lightning:
+#  modelcheckpoint:
+#    params:
+#      save_last: True
+##      every_n_val_epochs: 1
+
+lightning:
+  callbacks:
+    image_logger:
+      params:
+        batch_frequency: 15000
+        increase_log_steps: False
+
+data:
+  params:
+    batch_size: 4
+    num_workers: 8
+
+model:
+  base_learning_rate: 1.5625e-06 #2e-4 #4.5e-06 # TODO will be scaled by batch size already
+  target: ncsn.models.scorebased.ScoreBasedModel
+  params:
+    ckpt_path: logs/2021-06-17T16-06-49_lsun_vesde/checkpoints/last.ckpt
+    ncsn_config:
+      target: ncsn.modules.ncsns.ncsnpp.NCSNpp
+      params:
+        in_channels: 16
+        ch: 128
+        ch_mult: [1, 4, 4]
+        num_res_blocks: 8
+        resolution: 16
+        attn_resolutions: [8, 4]
+        resblock_type: biggan
+        nonlinearity: swish
+        embedding_type: fourier
+        fourier_scale: 16
+        time_conditional: True
+        resample_with_conv: True
+        fir: True
+        fir_kernel: [1, 3, 3, 1]
+        weight_init_scale: 0.
+        scale_by_sqrt2: True
+        scale_output_by_sigma: True
+        dropout: 0.
+        sigma_min: 0.01
+        sigma_max: 378 # need to adjust sde config too!
+        num_scales: 2000
+
+    sde_config:
+      target: ncsn.modules.sde.sde.VESDE
+      params:
+        sigma_min: 0.01
+        sigma_max: 378
+        N: 2000
+
+    sampling_kwargs:
+      sampling_method: pc
+      predictor: reverse_diffusion
+      corrector: langevin
+      n_steps_each: 1
+      shape: [2, 16, 16, 16]
+      eps: 1e-5
+      snr: 0.16
+      noise_removal: False

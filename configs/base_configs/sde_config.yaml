@@ -1,0 +1,31 @@
+# SDE base configurations
+---
+VESDE:
+  model:
+    params:
+      sde_config:
+        target: ncsn.modules.sde.sde.VESDE
+        params:
+          sigma_min: 0.01
+          sigma_max: 50
+          N: 1000
+
+VPSDE:
+  model:
+    params:
+      sde_config:
+        target: ncsn.modules.sde.sde.VPSDE
+        params:
+          beta_min: 0.1
+          beta_max: 20
+          N: 1000
+
+subVPSDE:
+  model:
+    params:
+      sde_config:
+        target: ncsn.modules.sde.sde.subVPSDE
+        params:
+          beta_min: 0.1
+          beta_max: 20
+          N: 1000
