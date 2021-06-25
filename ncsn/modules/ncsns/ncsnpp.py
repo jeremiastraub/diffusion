@@ -23,8 +23,8 @@ class GaussianFourierProjection(nn.Module):
         )
 
     def forward(self, x):
-        x = torch.log(x.clone())
-        x_proj = x[:, None] * self.W[None, :] * 2 * np.pi
+        x_proj = torch.log(x)
+        x_proj = x_proj[:, None] * self.W[None, :] * 2 * np.pi
         return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
 
     def get_sigmas(self, x):

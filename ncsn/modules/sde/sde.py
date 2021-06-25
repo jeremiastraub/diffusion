@@ -87,7 +87,6 @@ class SDE(abc.ABC):
         class RSDE(self.__class__):
             def __init__(self):
                 super().__init__(N)
-                # self.N = N
                 self.probability_flow = probability_flow
 
             @property
@@ -113,10 +112,12 @@ class SDE(abc.ABC):
                 sampler.
                 """
                 f, G = forward_discretize(x, t)
+
                 rev_f = (
                     f - G[:, None, None, None] ** 2 * score_model(x, t)
                     * (0.5 if self.probability_flow else 1.)
                 )
+
                 rev_G = torch.zeros_like(G) if self.probability_flow else G
                 return rev_f, rev_G
 

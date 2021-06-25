@@ -466,9 +466,14 @@ def get_pc_sampler(
 
 
 def get_ode_sampler(
-    sde, shape,
-                    denoise=False, rtol=1e-5, atol=1e-5,
-                    method='RK45', eps=1e-3, device='cuda'
+    sde,
+    shape,
+    denoise: bool = False,
+    rtol: float = 1e-5,
+    atol: float = 1e-5,
+    method: str = 'RK45',
+    eps: float = 1e-3,
+    device: str = 'cuda'
 ):
     """Probability flow ODE sampler with the black-box ODE solver.
 

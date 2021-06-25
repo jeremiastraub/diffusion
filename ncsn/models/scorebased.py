@@ -63,9 +63,6 @@ class ScoreBasedModel(pl.LightningModule):
             self.score_model, **(ema_kwargs if ema_kwargs is not None else {})
         )
 
-        # needed for sampling
-        self.continuous = loss_config["params"]["continuous"]
-
         self.ae_model = None
         if ae_config is not None:
             self.ae_model = instantiate_from_config(ae_config)
@@ -117,29 +114,34 @@ class ScoreBasedModel(pl.LightningModule):
         elif verbose:
             print("--ema-scope: EMA disabled, no EMA weights available")
         try:
-            yield None
+            yield
         finally:
             if self.use_ema:
                 self.ema.restore(self.score_model.parameters())
                 if verbose:
-                    print("--ema_scope: Restored training weights")
+                    print("--ema-scope: Restored training weights")
 
-    def get_input(self, batch, image_key):
+    def get_input(self, batch, image_key, device=None):
         """
 
         Args:
             batch:
             image_key:
+            device:
 
         Returns:
 
         """
+        # TODO If using ae_model, use its get_input method?
         x = batch[image_key]
         if len(x.shape) == 3:
             x = x[None, ...]
         x = x.permute(0, 3, 1, 2).to(
             memory_format=torch.contiguous_format
         ).float()
+
+        if device is not None:
+            x = x.to(device)
 
         if self.ae_model is not None:
             with torch.no_grad():
@@ -162,23 +164,18 @@ class ScoreBasedModel(pl.LightningModule):
             "loss", loss,
             prog_bar=True, logger=True, on_step=True, on_epoch=True,
         )
-
-        if self.use_ema:
-            self.ema(self.score_model)
-
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """"""
         inputs = self.get_input(batch, self.image_key)
 
-        # TODO Is this done for each validation batch anew?
-        with self.ema_scope():
-            loss = self.loss(inputs, model=self.score_model, sde=self.sde)
-            self.log("val/loss", loss)
-
+        loss = self.loss(inputs, model=self.score_model, sde=self.sde)
+        self.log("val/loss", loss)
         return loss
 
     def configure_optimizers(self):
+        """"""
         optimizer = torch.optim.Adam(
             self.score_model.parameters(),
             lr=self.learning_rate,
@@ -191,7 +188,24 @@ class ScoreBasedModel(pl.LightningModule):
 
         return optim_dict
 
-    def sample(self, **kwargs):
+    def on_before_zero_grad(self, optimizer) -> None:
+        """"""
+        # Update EMA model parameters
+        if self.use_ema:
+            self.ema(self.score_model)
+
+    def on_validation_start(self) -> None:
+        """"""
+        if self.use_ema:
+            self.ema.store(self.score_model.parameters())
+            self.ema.copy_to(self.score_model)
+
+    def on_validation_end(self) -> None:
+        """"""
+        if self.use_ema:
+            self.ema.restore(self.score_model.parameters())
+
+    def sample(self, verbose=False, **kwargs):
         """Sample from the model.
 
         Args:
@@ -203,13 +217,15 @@ class ScoreBasedModel(pl.LightningModule):
 
         sampling_fn = get_sampling_fn(
             sde=self.sde,
-            continuous=self.continuous,
+            # TODO Automatically set `continuous` argument depending on ...
+            #      loss type?
+            # continuous=self.continuous,
             **{**self.default_sampling_kwargs, **kwargs}
         )
 
         with torch.no_grad():
-            # with self.ema_scope(verbose=True):
-            x, x_mean = sampling_fn(self.score_model)
+            with self.ema_scope(verbose=verbose):
+                x, _ = sampling_fn(self.score_model)
 
             if self.ae_model is not None:
                 x = self.ae_model.decode(x)
@@ -226,9 +242,8 @@ class ScoreBasedModel(pl.LightningModule):
 
         if self.ae_model is not None:
             # Reconstruct an image using the autoencoder
-            x = self.get_input(batch, self.image_key)
-            x = x.to(self.device)
-            xrec, _ = self.ae_model(x)
+            x = self.get_input(batch, self.image_key, device=self.device)
+            xrec = self.ae_model.decode(x)
             log["reconstruction"] = xrec
 
         return log
