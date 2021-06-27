@@ -205,10 +205,27 @@ class ScoreBasedModel(pl.LightningModule):
         if self.use_ema:
             self.ema.restore(self.score_model.parameters())
 
+    def log_images(self, batch, **kwargs):
+        """Log generated samples"""
+        log = dict()
+
+        # Generate sample
+        samples = self.sample()
+        log["samples"] = samples
+
+        if self.ae_model is not None:
+            # Reconstruct an image using the autoencoder
+            x = self.get_input(batch, self.image_key, device=self.device)
+            xrec = self.ae_model.decode(x)
+            log["reconstruction"] = xrec
+
+        return log
+
     def sample(self, verbose=False, **kwargs):
         """Sample from the model.
 
         Args:
+            verbose: If True, print verbose EMA info
             **kwargs: Passed to sde.sampling.get_sampling_fn
 
         Returns: Randomly generated sample
@@ -232,18 +249,34 @@ class ScoreBasedModel(pl.LightningModule):
 
         return x
 
-    def log_images(self, batch, **kwargs):
-        """Log generated samples"""
-        log = dict()
+    def _sampling_generator(self, last_only=True, **kwargs):
+        """Sampling generator. Only for PC-sampling.
 
-        # Generate sample
-        samples = self.sample()
-        log["samples"] = samples
+        Args:
+            last_only: If using a AE-model, only decodes the last sampling
+                stage, in order to speed up sampling.
+            **kwargs: Passed to sde.sampling.get_sampling_fn
 
-        if self.ae_model is not None:
-            # Reconstruct an image using the autoencoder
-            x = self.get_input(batch, self.image_key, device=self.device)
-            xrec = self.ae_model.decode(x)
-            log["reconstruction"] = xrec
+        Returns: Randomly generated sample
+        """
+        # TODO What about sampling "device" (<-> lightning) ?
 
-        return log
+        sampling_fn = get_sampling_fn(
+            sde=self.sde,
+            as_generator=True,
+            **{**self.default_sampling_kwargs, **kwargs}
+        )
+
+        with torch.no_grad():
+            with self.ema_scope():
+                for x, _ in sampling_fn(self.score_model):
+
+                    if self.ae_model is None or last_only:
+                        yield x
+                    else:
+                        yield self.ae_model.decode(x)
+
+            # NOTE This is an additional (potentially duplicate) yield
+            #      statement. Can be omitted if detecting/catching the last
+            #      sampling stage in the loop above.
+            yield self.ae_model.decode(x)

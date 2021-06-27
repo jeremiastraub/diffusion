@@ -94,7 +94,8 @@ def get_sampling_fn(
     snr: float = None,
     n_steps_each: int = None,
     probability_flow: bool = False,
-    continuous: bool = True
+    continuous: bool = True,
+    as_generator: bool = False
 ):
     """Create a sampling function.
 
@@ -147,6 +148,7 @@ def get_sampling_fn(
             denoise=noise_removal,
             eps=eps,
             device=device,
+            as_generator=as_generator,
         )
     else:
         raise ValueError(
@@ -174,12 +176,13 @@ class Predictor(abc.ABC):
         """One update of the predictor.
 
         Args:
-          x: A PyTorch tensor representing the current state
-          t: A Pytorch tensor representing the current time step.
+            x: A PyTorch tensor representing the current state
+            t: A Pytorch tensor representing the current time step.
 
         Returns:
-          x: A PyTorch tensor of the next state.
-          x_mean: A PyTorch tensor. The next state without random noise. Useful for denoising.
+            x: A PyTorch tensor of the next state.
+            x_mean: A PyTorch tensor. The next state without random noise.
+                Useful for denoising.
         """
         pass
 
@@ -199,12 +202,13 @@ class Corrector(abc.ABC):
         """One update of the corrector.
 
         Args:
-          x: A PyTorch tensor representing the current state
-          t: A PyTorch tensor representing the current time step.
+            x: A PyTorch tensor representing the current state
+            t: A PyTorch tensor representing the current time step.
 
         Returns:
-          x: A PyTorch tensor of the next state.
-          x_mean: A PyTorch tensor. The next state without random noise. Useful for denoising.
+            x: A PyTorch tensor of the next state.
+            x_mean: A PyTorch tensor. The next state without random noise.
+                Useful for denoising.
         """
         pass
 
@@ -243,13 +247,17 @@ class AncestralSamplingPredictor(Predictor):
     def __init__(self, sde, score_fn, probability_flow=False):
         super().__init__(sde, score_fn, probability_flow)
         if not isinstance(sde, VPSDE) and not isinstance(sde, VESDE):
-            raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
-        assert not probability_flow, "Probability flow not supported by ancestral sampling"
+            raise NotImplementedError(
+                f"SDE class {sde.__class__.__name__} not yet supported."
+            )
+        assert not probability_flow, (
+            "Probability flow not supported by ancestral sampling"
+        )
 
     def vesde_update_fn(self, x, t):
         sde = self.sde
         timestep = (t * (sde.N - 1) / sde.T).long()
-        sigma = sde.discrete_sigmas[timestep]
+        sigma = sde.discrete_sigmas[timestep].to(t.device)
         adjacent_sigma = torch.where(timestep == 0, torch.zeros_like(t), sde.discrete_sigmas.to(t.device)[timestep - 1])
         score = self.score_fn(x, t)
         x_mean = x + score * (sigma ** 2 - adjacent_sigma ** 2)[:, None, None, None]
@@ -290,10 +298,14 @@ class NonePredictor(Predictor):
 class LangevinCorrector(Corrector):
     def __init__(self, sde, score_fn, snr, n_steps):
         super().__init__(sde, score_fn, snr, n_steps)
-        if not isinstance(sde, VPSDE) \
-            and not isinstance(sde, VESDE) \
-            and not isinstance(sde, subVPSDE):
-            raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
+        if (
+            not isinstance(sde, VPSDE)
+            and not isinstance(sde, VESDE)
+            and not isinstance(sde, subVPSDE)
+        ):
+            raise NotImplementedError(
+                f"SDE class {sde.__class__.__name__} not yet supported."
+            )
 
     def update_fn(self, x, t):
         sde = self.sde
@@ -323,15 +335,20 @@ class LangevinCorrector(Corrector):
 class AnnealedLangevinDynamics(Corrector):
     """The original annealed Langevin dynamics predictor in NCSN/NCSNv2.
 
-    We include this corrector only for completeness. It was not directly used in our paper.
+    We include this corrector only for completeness. It was not directly used
+    in our paper.
     """
 
     def __init__(self, sde, score_fn, snr, n_steps):
         super().__init__(sde, score_fn, snr, n_steps)
-        if not isinstance(sde, VPSDE) \
-            and not isinstance(sde, VESDE) \
-            and not isinstance(sde, subVPSDE):
-            raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
+        if (
+            not isinstance(sde, VPSDE)
+            and not isinstance(sde, VESDE)
+            and not isinstance(sde, subVPSDE)
+        ):
+            raise NotImplementedError(
+                f"SDE class {sde.__class__.__name__} not yet supported."
+            )
 
     def update_fn(self, x, t):
         sde = self.sde
@@ -373,7 +390,8 @@ class NoneCorrector(Corrector):
 def shared_predictor_update_fn(
     x, t, sde, model, predictor, probability_flow, continuous
 ):
-    """A wrapper that configures and returns the update function of predictors."""
+    """A wrapper that configures and returns the update function of predictors.
+    """
     score_fn = get_score_fn(sde, model, continuous=continuous)
     if predictor is None:
         # Corrector-only sampler
@@ -386,7 +404,8 @@ def shared_predictor_update_fn(
 def shared_corrector_update_fn(
     x, t, sde, model, corrector, continuous, snr, n_steps
 ):
-    """A wrapper tha configures and returns the update function of correctors."""
+    """A wrapper tha configures and returns the update function of correctors.
+    """
     score_fn = get_score_fn(sde, model, continuous=continuous)
     if corrector is None:
         # Predictor-only sampler
@@ -408,7 +427,8 @@ def get_pc_sampler(
     continuous=False,
     denoise=True,
     eps=1e-3,
-    device='cuda'
+    device='cuda',
+    as_generator=False
 ):
     """Create a Predictor-Corrector (PC) sampler.
 
@@ -441,26 +461,49 @@ def get_pc_sampler(
                                             snr=snr,
                                             n_steps=n_steps)
 
-    def pc_sampler(model):
-        """ The PC sampler funciton.
+    if not as_generator:
+        def pc_sampler(model):
+            """ The PC sampler funciton.
 
-        Args:
-          model: A score model.
-        Returns:
-          Samples, number of function evaluations.
-        """
-        with torch.no_grad():
-            # Initial sample
-            x = sde.prior_sampling(shape).to(device)
-            timesteps = torch.linspace(sde.T, eps, sde.N, device=device)
+            Args:
+              model: A score model.
+            Returns:
+              Samples, number of function evaluations.
+            """
+            with torch.no_grad():
+                # Initial sample
+                x = sde.prior_sampling(shape).to(device)
+                timesteps = torch.linspace(sde.T, eps, sde.N, device=device)
 
-            for i in range(sde.N):
-                t = timesteps[i]
-                vec_t = torch.ones(shape[0], device=t.device) * t
-                x, x_mean = corrector_update_fn(x, vec_t, model=model)
-                x, x_mean = predictor_update_fn(x, vec_t, model=model)
+                for i in range(sde.N):
+                    t = timesteps[i]
+                    vec_t = torch.ones(shape[0], device=t.device) * t
+                    x, x_mean = corrector_update_fn(x, vec_t, model=model)
+                    x, x_mean = predictor_update_fn(x, vec_t, model=model)
 
-            return x_mean if denoise else x, sde.N * (n_steps + 1)
+                return x_mean if denoise else x, sde.N * (n_steps + 1)
+
+    else:
+        def pc_sampler(model):
+            """ The PC sampler generator.
+
+            Args:
+              model: A score model.
+            Yields:
+              Samples, number of function evaluations.
+            """
+            with torch.no_grad():
+                # Initial sample
+                x = sde.prior_sampling(shape).to(device)
+                timesteps = torch.linspace(sde.T, eps, sde.N, device=device)
+
+                for i in range(sde.N):
+                    t = timesteps[i]
+                    vec_t = torch.ones(shape[0], device=t.device) * t
+                    x, x_mean = corrector_update_fn(x, vec_t, model=model)
+                    x, x_mean = predictor_update_fn(x, vec_t, model=model)
+
+                    yield x_mean if denoise else x, (i + 1) * (n_steps + 1)
 
     return pc_sampler
 
@@ -518,7 +561,8 @@ def get_ode_sampler(
         with torch.no_grad():
             # Initial sample
             if z is None:
-                # If not represent, sample the latent code from the prior distibution of the SDE.
+                # If not represent, sample the latent code from the prior
+                # distibution of the SDE.
                 x = sde.prior_sampling(shape).to(device)
             else:
                 x = z
@@ -530,12 +574,19 @@ def get_ode_sampler(
                 return to_flattened_numpy(drift)
 
             # Black-box ODE solver for the probability flow ODE
-            solution = integrate.solve_ivp(ode_func, (sde.T, eps), to_flattened_numpy(x),
-                                           rtol=rtol, atol=atol, method=method)
+            solution = integrate.solve_ivp(
+                ode_func,
+                (sde.T, eps),
+                to_flattened_numpy(x),
+                rtol=rtol,
+                atol=atol,
+                method=method,
+            )
             nfe = solution.nfev
             x = torch.tensor(solution.y[:, -1]).reshape(shape).to(device).type(torch.float32)
 
-            # Denoising is equivalent to running one predictor step without adding noise
+            # Denoising is equivalent to running one predictor step without
+            # adding noise
             if denoise:
                 x = denoise_update_fn(model, x)
 
