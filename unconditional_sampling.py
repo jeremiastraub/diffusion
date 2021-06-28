@@ -3,7 +3,7 @@
 Run via:
     streamlit run unconditional_sampling.py -- --config <path-to-config>
 """
-import argparse, os, sys, time
+import argparse, os, sys, time, glob
 
 from omegaconf import OmegaConf
 import streamlit as st
@@ -303,12 +303,20 @@ def run_gaussian_sampling(model):
 def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-c",
-        "--config",
+        "-r",
+        "--resume",
+        type=str,
         nargs="?",
-        help="path to config",
-        const=True,
-        default="",
+        help="load from logdir or checkpoint in logdir",
+    )
+    parser.add_argument(
+        "-b",
+        "--base",
+        nargs="*",
+        metavar="base_config.yaml",
+        help="paths to base configs. Loaded from left-to-right. "
+        "Parameters can be overwritten or added with command-line options of the form `--key value`.",
+        default=list(),
     )
     return parser
 
@@ -321,14 +329,51 @@ def get_data(config):
     return data
 
 
-@st.cache(allow_output_mutation=True)
-def load_model(config, gpu, eval_mode):
-    model = instantiate_from_config(config.model)
+def load_model_from_config(config, sd, gpu=True, eval_mode=True):
+    return {"model": model}
+
+
+@st.cache(allow_output_mutation=True, suppress_st_warning=True)
+def load_model(config, ckpt, gpu, eval_mode):
+    """
+
+    Args:
+        config: The model config
+        ckpt: path to checkpoint
+        gpu: Whether to use gpu
+        eval_mode: Whether to set model to eval mode
+
+    Returns: loaded model, global step
+    """
+    # load the specified checkpoint
+    if ckpt:
+        pl_sd = torch.load(ckpt, map_location="cpu")
+        global_step = pl_sd["global_step"]
+    else:
+        pl_sd = {"state_dict": None}
+        global_step = None
+
+    if ckpt and "ckpt_path" in config.params:
+        st.warning("Deleting the restore-ckpt path from the config...")
+        config.params.ckpt_path = None
+
+    model = instantiate_from_config(config)
+
+    if pl_sd["state_dict"] is not None:
+        missing, unexpected = model.load_state_dict(
+            pl_sd["state_dict"], strict=False
+        )
+        if missing:
+            st.info(f"Missing Keys in State Dict: {missing}")
+        if unexpected:
+            st.info(f"Unexpected Keys in State Dict: {unexpected}")
+
     if gpu:
         model.cuda()
     if eval_mode:
         model.eval()
-    return model
+
+    return model, global_step
 
 
 if __name__ == "__main__":
@@ -337,16 +382,44 @@ if __name__ == "__main__":
     parser = get_parser()
     opt, unknown = parser.parse_known_args()
 
-    config = OmegaConf.load(opt.config)
-    config = resolve_based_on(config)
+    ckpt = None
+    if opt.resume:
+        if not os.path.exists(opt.resume):
+            raise ValueError("Cannot find {}".format(opt.resume))
+        if os.path.isfile(opt.resume):
+            paths = opt.resume.split("/")
+            try:
+                idx = len(paths)-paths[::-1].index("logs")+1
+            except ValueError:
+                idx = -2 # take a guess: path/to/logdir/checkpoints/model.ckpt
+            logdir = "/".join(paths[:idx])
+            ckpt = opt.resume
+        else:
+            assert os.path.isdir(opt.resume), opt.resume
+            logdir = opt.resume.rstrip("/")
+            ckpt = os.path.join(logdir, "checkpoints", "last.ckpt")
+
+        base_configs = sorted(
+            glob.glob(os.path.join(logdir, "configs/*-project.yaml"))
+        )
+        opt.base = base_configs + opt.base
+        opt.resume_from_checkpoint = ckpt
+
+    configs = [OmegaConf.load(cfg) for cfg in opt.base]
+    configs = [resolve_based_on(cfg) for cfg in configs]
     cli = OmegaConf.from_dotlist(unknown)
-    config = OmegaConf.merge(config, cli)
+    config = OmegaConf.merge(*configs, cli)
+
+    st.sidebar.text(f"ckpt: {ckpt}")
 
     gpu = True
     eval_mode = True
-    model = load_model(config, gpu, eval_mode)
+    model, global_step = load_model(config.model, ckpt, gpu, eval_mode)
+
+    st.sidebar.text(f"global step: {global_step}")
 
     run_option = st.radio("Task", ("Sample", "Reconstruct"))
+    st.sidebar.text("—————————————————————————————————")
     st.sidebar.text("Options")
 
     if run_option == "Reconstruct":
@@ -354,7 +427,6 @@ if __name__ == "__main__":
         run_reconstruct(model, dsets)
 
     elif run_option == "Sample":
-        st.sidebar.text("Sampling options")
         sample_option = st.sidebar.radio(
             "Where to sample from?", ("Score model", "Gaussian")
         )

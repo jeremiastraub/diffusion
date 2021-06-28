@@ -9,6 +9,9 @@ pip install -e convae
 
 Run streamlit script for unconditional image generation:
 ```bash
-streamlit run unconditional_sampling.py -- --config configs/latent/ve/LSUNchurch_small.yaml
+streamlit run unconditional_sampling.py -- -r <log-dir>
 ```
 
+Some log-directories:
+* LSUN churches: ``/export/scratch/jtraub/logs/ncsn/2021-06-26T12-45-49_lsun_vesde``
+* FacesHQ: ``/export/scratch/jtraub/logs/ncsn/2021-06-26T13-23-06_faceshq_vesde_medium``
