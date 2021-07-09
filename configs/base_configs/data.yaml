@@ -10,3 +10,70 @@ LSUNchurch256:
         target: ncsn.data.lsun.LSUNChurchesTrain # 256 x 256
       validation:
         target: ncsn.data.lsun.LSUNChurchesValidation # 256 x 256
+
+FacesHQ256:
+  data:
+    target: cutlit.DataModuleFromConfig
+    params:
+      batch_size: 16
+      num_workers: 8
+      train:
+        target: ncsn.data.faceshq.FacesHQTrain
+        params:
+          size: 256
+      validation:
+        target: ncsn.data.faceshq.FacesHQValidation
+        params:
+          size: 256
+
+FullOpenImages256:
+  data:
+    target: cutlit.DataModuleFromConfig
+    params:
+      batch_size: 16
+      num_workers: 8
+      wrap: true
+      train:
+        target: ncsn.data.openimages.FullOpenImagesTrain
+        params:
+          size: 384
+          crop_size: 256
+      validation:
+        target: ncsn.data.openimages.FullOpenImagesValidation
+        params:
+          size: 384
+          crop_size: 256
+
+ImageNet256:
+  data:
+    target: cutlit.DataModuleFromConfig
+    params:
+      batch_size: 16
+      num_workers: 8
+      train:
+        target: ncsn.data.imagenet.ImageNetTrain
+        params:
+          config:
+            size: 256
+      validation:
+        target: ncsn.data.imagenet.ImageNetValidation
+        params:
+          config:
+            size: 256
+
+ImageNetHQ256:
+  data:
+    target: cutlit.DataModuleFromConfig
+    params:
+      batch_size: 16
+      num_workers: 8
+      train:
+        target: ncsn.data.imagenet.ImageNetHQTrain
+        params:
+          config:
+            size: 256
+      validation:
+        target: ncsn.data.imagenet.ImageNetHQValidation
+        params:
+          config:
+            size: 256

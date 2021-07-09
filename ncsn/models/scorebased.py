@@ -67,6 +67,10 @@ class ScoreBasedModel(pl.LightningModule):
         if ae_config is not None:
             self.ae_model = instantiate_from_config(ae_config)
 
+        # Turn off gradient computation for the ae model
+        for param in self.ae_model.parameters():
+            param.requires_grad = False
+
         self.optimizer_kwargs = (
             optimizer_kwargs if optimizer_kwargs is not None else {}
         )
@@ -83,14 +87,11 @@ class ScoreBasedModel(pl.LightningModule):
             self.init_from_ckpt(ckpt_path, ignore_keys)
 
     def init_from_ckpt(self, ckpt_path, ignore_keys=None):
-        """
+        """Restores weights from a checkpoint file.
 
         Args:
-            ckpt_path:
-            ignore_keys:
-
-        Returns:
-
+            ckpt_path: Path to checkpoint file
+            ignore_keys: Iterable containing state_dict keys not to be loaded
         """
         if ignore_keys is None:
             ignore_keys = []
@@ -122,16 +123,7 @@ class ScoreBasedModel(pl.LightningModule):
                     print("--ema-scope: Restored training weights")
 
     def get_input(self, batch, image_key, device=None):
-        """
-
-        Args:
-            batch:
-            image_key:
-            device:
-
-        Returns:
-
-        """
+        """"""
         # TODO If using ae_model, use its get_input method?
         x = batch[image_key]
         if len(x.shape) == 3:
@@ -140,10 +132,12 @@ class ScoreBasedModel(pl.LightningModule):
             memory_format=torch.contiguous_format
         ).float()
 
+        # TODO can be omitted?
         if device is not None:
             x = x.to(device)
 
         if self.ae_model is not None:
+            # TODO omit torch.no_grad if requires_grad=False?
             with torch.no_grad():
                 x = self.ae_model.encode(x).sample()
 
@@ -205,26 +199,65 @@ class ScoreBasedModel(pl.LightningModule):
         if self.use_ema:
             self.ema.restore(self.score_model.parameters())
 
-    def log_images(self, batch, **kwargs):
-        """Log generated samples"""
+    def log_images(
+        self,
+        batch,
+        *,
+        to_log=("samples", "reconstructions"),
+        num_samples=None,
+        **kwargs
+    ):
+        """Log images.
+
+        Args:
+            batch: current batch
+            to_log: Iterable containing the image logging keys. Available keys:
+                samples, reconstructions, inputs.
+            num_samples: When logging samples, number of samples to create.
+                If not None, overwrites the ``shape`` sampling kwarg.
+            **kwargs: unused, but required for cutlit compatibility
+
+        Returns: log dict containing images keyed by logging key
+        """
+        _available_keys = ["samples", "reconstructions", "inputs"]
+        invalid_keys = [k for k in to_log if k not in _available_keys]
+        if invalid_keys:
+            raise ValueError(
+                "Received invalid image logging keys: "
+                f"{', '.join(invalid_keys)}"
+                f"\nAvailable keys: {', '.join(_available_keys)}"
+            )
+
         log = dict()
 
-        # Generate sample
-        samples = self.sample()
-        log["samples"] = samples
+        if "samples" in to_log:
+            samples = self.sample(num_samples=num_samples)
+            log["samples"] = samples
 
-        if self.ae_model is not None:
-            # Reconstruct an image using the autoencoder
-            x = self.get_input(batch, self.image_key, device=self.device)
-            xrec = self.ae_model.decode(x)
-            log["reconstruction"] = xrec
+        if "inputs" in to_log:
+            if self.ae_model is not None:
+                log["inputs"] = self.ae_model.get_input(batch, self.image_key)
+            else:
+                log["inputs"] = self.get_input(batch, self.image_key)
+
+        if "reconstructions" in to_log:
+            if self.ae_model is not None:
+                x = self.get_input(batch, self.image_key, device=self.device)
+                xrec = self.ae_model.decode(x)
+                log["reconstructions"] = xrec
+            else:
+                raise ValueError(
+                    "reconstructions are only available when using an ae_model"
+                )
 
         return log
 
-    def sample(self, verbose=False, **kwargs):
+    def sample(self, num_samples=None, verbose=False, **kwargs):
         """Sample from the model.
 
         Args:
+            num_samples: When logging samples, number of samples to create.
+                If not None, overwrites the ``shape`` sampling kwarg.
             verbose: If True, print verbose EMA info
             **kwargs: Passed to sde.sampling.get_sampling_fn
 
@@ -232,12 +265,19 @@ class ScoreBasedModel(pl.LightningModule):
         """
         # TODO What about sampling "device" (<-> lightning) ?
 
+        sampling_kwargs = {**self.default_sampling_kwargs, **kwargs}
+        if num_samples is not None:
+            assert "shape" in sampling_kwargs
+            sampling_kwargs["shape"] = (
+                [num_samples] + sampling_kwargs["shape"][1:]
+            )
+
         sampling_fn = get_sampling_fn(
             sde=self.sde,
             # TODO Automatically set `continuous` argument depending on ...
             #      loss type?
             # continuous=self.continuous,
-            **{**self.default_sampling_kwargs, **kwargs}
+            **sampling_kwargs
         )
 
         with torch.no_grad():
@@ -249,10 +289,12 @@ class ScoreBasedModel(pl.LightningModule):
 
         return x
 
-    def _sampling_generator(self, last_only=True, **kwargs):
+    def _sampling_generator(self, num_samples=None, last_only=True, **kwargs):
         """Sampling generator. Only for PC-sampling.
 
         Args:
+            num_samples: When logging samples, number of samples to create.
+                If not None, overwrites the ``shape`` sampling kwarg.
             last_only: If using a AE-model, only decodes the last sampling
                 stage, in order to speed up sampling.
             **kwargs: Passed to sde.sampling.get_sampling_fn
@@ -261,10 +303,17 @@ class ScoreBasedModel(pl.LightningModule):
         """
         # TODO What about sampling "device" (<-> lightning) ?
 
+        sampling_kwargs = {**self.default_sampling_kwargs, **kwargs}
+        if num_samples is not None:
+            assert "shape" in sampling_kwargs
+            sampling_kwargs["shape"] = (
+                [num_samples] + sampling_kwargs["shape"][1:]
+            )
+
         sampling_fn = get_sampling_fn(
             sde=self.sde,
             as_generator=True,
-            **{**self.default_sampling_kwargs, **kwargs}
+            **sampling_kwargs
         )
 
         with torch.no_grad():

@@ -81,6 +81,7 @@ def get_corrector(name):
     return _CORRECTORS[name]
 
 
+# TODO Make default values consistent with get_*_sampler methods – restructure?
 def get_sampling_fn(
     sampling_method: str,
     *,
@@ -95,7 +96,10 @@ def get_sampling_fn(
     n_steps_each: int = None,
     probability_flow: bool = False,
     continuous: bool = True,
-    as_generator: bool = False
+    as_generator: bool = False,
+    ode_rtol: float = 1e-5,
+    ode_atol: float = 1e-5,
+    ode_method: str = "RK45"
 ):
     """Create a sampling function.
 
@@ -114,6 +118,10 @@ def get_sampling_fn(
         n_steps_each:
         probability_flow:
         continuous:
+        as_generator:
+        ode_rtol:
+        ode_atol:
+        ode_method:
 
     Returns: A function that takes random states and a replicated training
         state and outputs samples with the trailing dimensions matching
@@ -129,6 +137,9 @@ def get_sampling_fn(
             denoise=noise_removal,
             eps=eps,
             device=device,
+            rtol=ode_rtol,
+            atol=ode_atol,
+            method=ode_method,
         )
 
     # Predictor-Corrector sampling. Predictor-only and Corrector-only samplers

@@ -1,4 +1,4 @@
-import argparse, os, sys, datetime, glob, importlib
+import argparse, os, sys, datetime, glob, importlib, csv
 from omegaconf import OmegaConf
 import numpy as np
 from PIL import Image
@@ -294,22 +294,52 @@ class SetupCallback(Callback):
 
 
 class ImageLogger(Callback):
-    def __init__(self, batch_frequency, max_images, clamp=True, increase_log_steps=True,
-                 rescale=True, disabled=False, log_on_batch_idx=True):
+    def __init__(
+        self,
+        *,
+        batch_frequency,
+        max_images,
+        min_steps=0,
+        clamp=True,
+        rescale=True,
+        use_exponential_steps=False,
+        log_on_batch_idx=False,
+        **log_kwargs
+    ):
+        """Callback for logging images.
+
+        .. note::
+
+            Requires the ``log_images`` method of the respective pl-module
+            to return a dict containing the images keyed by logging key.
+
+        Args:
+            batch_frequency: Number of batches between logging steps.
+            max_images: Maximum number of logged images. Set to zero to disable
+                image logging.
+            min_steps: Minimum number of steps before logging starts
+            clamp: Whether to clamp image to [0, 1]
+            rescale: Whether to transform image data from [-1, 1] to [0, 1]
+            use_exponential_steps: If True, logging steps are powers of 2;
+                Ignores ``batch_frequency`` if logging is not disabled.
+            log_on_batch_idx: Whether to log based on the batch index of the
+                current epoch. If False, logging is based on the global step.
+            **log_kwargs: Passed to pl_module.log_images
+        """
         super().__init__()
         self.rescale = rescale
         self.batch_freq = batch_frequency
         self.max_images = max_images
+        self.min_steps = min_steps
         self.logger_log_images = {
             pl.loggers.WandbLogger: self._wandb,
             pl.loggers.TestTubeLogger: self._testtube,
         }
-        self.log_steps = [2 ** n for n in range(int(np.log2(self.batch_freq)) + 1)]
-        if not increase_log_steps:
-            self.log_steps = [self.batch_freq]
+        self.use_exponential_steps = use_exponential_steps
+        self.current_exponent = None
         self.clamp = clamp
-        self.disabled = disabled
         self.log_on_batch_idx = log_on_batch_idx
+        self.log_kwargs = log_kwargs
 
     @rank_zero_only
     def _wandb(self, pl_module, images, batch_idx, split):
@@ -324,12 +354,12 @@ class ImageLogger(Callback):
     def _testtube(self, pl_module, images, batch_idx, split):
         for k in images:
             grid = torchvision.utils.make_grid(images[k])
-            grid = (grid+1.0)/2.0 # -1,1 -> 0,1; c,h,w
+            grid = (grid + 1.) / 2. # -1,1 -> 0,1; c,h,w
 
             tag = f"{split}/{k}"
             pl_module.logger.experiment.add_image(
-                tag, grid,
-                global_step=pl_module.global_step)
+                tag, grid, global_step=pl_module.global_step
+            )
 
     @rank_zero_only
     def log_local(self, save_dir, split, images,
@@ -338,34 +368,40 @@ class ImageLogger(Callback):
         for k in images:
             grid = torchvision.utils.make_grid(images[k], nrow=4)
             if self.rescale:
-                grid = (grid+1.0)/2.0 # -1,1 -> 0,1; c,h,w
+                grid = (grid + 1.) / 2. # -1,1 -> 0,1; c,h,w
             grid = grid.transpose(0,1).transpose(1,2).squeeze(-1)
             grid = grid.numpy()
             grid = (grid*255).astype(np.uint8)
             filename = "{}_gs-{:06}_e-{:06}_b-{:06}.png".format(
-                k,
-                global_step,
-                current_epoch,
-                batch_idx)
+                k, global_step, current_epoch, batch_idx
+            )
             path = os.path.join(root, filename)
             os.makedirs(os.path.split(path)[0], exist_ok=True)
             Image.fromarray(grid).save(path)
 
     def log_img(self, pl_module, batch, batch_idx, split="train"):
-        check_idx = batch_idx if self.log_on_batch_idx else pl_module.global_step
-        if (self.check_frequency(check_idx) and  # batch_idx % self.batch_freq == 0
-                hasattr(pl_module, "log_images") and
-                callable(pl_module.log_images) and
-                self.max_images > 0):
+        check_idx = (
+            batch_idx if self.log_on_batch_idx else pl_module.global_step
+        )
+        # Initialize exponent on first ``log_img`` call
+        if self.current_exponent is None:
+            if self.log_on_batch_idx:
+                self.current_exponent = 0
+            else:
+                self.current_exponent = (
+                    0 if pl_module.global_step == 0
+                    else int(np.log2(pl_module.global_step)) + 1
+                )
+        if (self.check_frequency(check_idx) and self.max_images > 0):
             logger = type(pl_module.logger)
-
             is_train = pl_module.training
             if is_train:
                 pl_module.eval()
 
             with torch.no_grad():
-#                with torch.cuda.device(torch.device("cpu")):  # TODO: attention
-                images = pl_module.log_images(batch, split=split)
+                images = pl_module.log_images(
+                    batch, split=split, **self.log_kwargs
+                )
 
             for k in images:
                 N = min(images[k].shape[0], self.max_images)
@@ -375,33 +411,48 @@ class ImageLogger(Callback):
                     if self.clamp:
                         images[k] = torch.clamp(images[k], -1., 1.)
 
-            self.log_local(pl_module.logger.save_dir, split, images,
-                           pl_module.global_step, pl_module.current_epoch, batch_idx)
+            self.log_local(
+                pl_module.logger.save_dir,
+                split,
+                images,
+                pl_module.global_step,
+                pl_module.current_epoch,
+                batch_idx
+            )
 
-            logger_log_images = self.logger_log_images.get(logger, lambda *args, **kwargs: None)
+            logger_log_images = self.logger_log_images.get(
+                logger, lambda *args, **kwargs: None
+            )
             logger_log_images(pl_module, images, pl_module.global_step, split)
 
             if is_train:
                 pl_module.train()
 
-    def check_frequency(self, batch_idx):
-        if (batch_idx % self.batch_freq) == 0 or (batch_idx in self.log_steps):
-            try:
-                self.log_steps.pop(0)
-            except IndexError:
-                pass
+    def check_frequency(self, n):
+        if self.use_exponential_steps and n == 2 ** self.current_exponent:
+            self.current_exponent += 1
+            if n >= self.min_steps:
+                return True
+        elif n % self.batch_freq == 0 and n >= self.min_steps:
             return True
         return False
 
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
-        if not self.disabled:
-            self.log_img(pl_module, batch, batch_idx, split="train")
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+    ):
+        self.log_img(pl_module, batch, batch_idx, split="train")
 
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
-        if not self.disabled:
-            self.log_img(pl_module, batch, batch_idx, split="val")
+    def on_validation_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+    ):
+        self.log_img(pl_module, batch, batch_idx, split="val")
+
         if hasattr(pl_module, 'calibrate_grad_norm'):
-            if (pl_module.calibrate_grad_norm and batch_idx % 25 == 0) and batch_idx > 0:
+            if (
+                pl_module.calibrate_grad_norm
+                and batch_idx % 25 == 0
+                and batch_idx > 0
+            ):
                 self.log_gradients(trainer,pl_module,batch_idx=batch_idx)
 
     @rank_zero_only
@@ -462,134 +513,237 @@ class ImageLogger(Callback):
 
 
 class FIDelity(Callback):
-    def __init__(self, dset_cfg,
-                 num_images=5000, epoch_frequency=1, step_frequency=None,
-                 input_key="inputs", output_key="samples", cached_inputs=None,
-                 batch_size=16, isc=True, kid=True, fid=True, clamp=True, cache_input=True):
-        # cached_inputs: if not None, should be a path to where the data is stored
+    def __init__(
+        self,
+        *,
+        data_cfg,
+        split="validation",
+        num_images=5000,
+        isc=True,
+        kid=True,
+        fid=True,
+        epoch_frequency=1,
+        step_frequency=None,
+        min_steps=0,
+        input_key="inputs",
+        output_key="samples",
+        load_input_from=None,
+        save_input_to=None,
+        clamp=True,
+        keep_intermediate_output=False,
+        **fid_kwargs
+    ):
+        """Callback for evaluating and logging FID, IS, etc.
+        Based on https://torch-fidelity.readthedocs.io/en/latest/api.html.
+
+        .. note::
+
+            Requires the ``log_images`` method of the respective pl-module
+            to return a dict containing the ``input_key`` and ``output_key``
+            keys (these are passed to the logging method as ``to_log``).
+
+        Args:
+            data_cfg: cutlit.DataModuleFromConfig configuration. Passed to
+                cutlit.instantiate_from_config.
+            split: dset split to use, can be one of: train, validation, test.
+            num_images: Number of images to use for score evaluation. If < 0,
+                the whole dataset split is used.
+            isc: Whether to calculate the Inception Score
+            kid: Whether to calculate the Kernel Inception Distance
+            fid: Whether to calculate the Frechet Inception Distance
+            epoch_frequency: Number of epochs between score evaluations. Set to
+                None to disable epoch-periodic evaluation.
+            step_frequency: Number of steps between score evaluations. Set to
+                None to disable step-periodic evaluation.
+            min_steps: If step-periodic evaluation is enabled, defines starting
+                threshold.
+            input_key: Input image logging key
+            output_key: Output image logging key
+            load_input_from: Custom path to directory containing the input
+                images (e.g. previously written there via save_input_to).
+            save_input_to: Custom path to directory where the input images are
+                written to. May not be given together with load_input_from.
+            clamp: Whether to clamp images to [0, 1]
+            keep_intermediate_output: Whether to store output images for each
+                evaluation separately. If False, overwrites previous outputs.
+            **fid_kwargs: Passed to torch_fidelity.calculate_metrics
+        """
         super().__init__()
-        self.dset_cfg = dset_cfg
-        self.batch_size = batch_size
+        self.data_cfg = data_cfg
+        self.split = split
         self.num_images = num_images
         self.input_key = input_key
         self.output_key = output_key
-        self.epoch_freq = epoch_frequency
-        self.step_freq = step_frequency
-        self.cached_data = cached_inputs
+        self.epoch_frequency = epoch_frequency
+        self.step_frequency = step_frequency
+        self.min_steps = min_steps
+        assert not (load_input_from is not None and save_input_to is not None)
+        self.load_input_from = load_input_from
+        self.save_input_to = save_input_to
+        self.keep_intermediate = keep_intermediate_output
+
         self.isc = isc
         self.kid = kid
         self.fid = fid
-        self.prepared = False
         self.clamp = clamp
-        self.cache_input = cache_input
-        if step_frequency is not None:
-            self.min_steps = 0
-            self.executed_steps = list()
+        self.fid_kwargs = fid_kwargs
+
+        self.prepared = False
+        self.input_cached = False
+        self.executed_steps = list()
 
     @rank_zero_only
     def prepare(self, logdir):
-        self.init_data(self.dset_cfg, self.batch_size, self.num_images)
-        self._init_folders(logdir)
-        self.prepared = True
+        if not self.prepared:
+            self.init_data()
+            self._init_folders(logdir)
+            self.prepared = True
 
     @rank_zero_only
     def _init_folders(self, logdir):
-        indir = os.path.join(logdir, "fidelity", self.data, "inputs")
-        outdir = os.path.join(logdir, "fidelity", self.data, "outputs")
+        # set up directories where the images will be stored at
+        workdir = os.path.join(logdir, "fidelity", self.dset_name)
+        indir = os.path.join(workdir, self.input_key)
+        outdir = os.path.join(workdir, self.output_key)
+
+        if self.load_input_from is not None:
+            indir = self.load_input_from
+            if not os.path.isdir(indir):
+                raise FileNotFoundError(f"Cache directory {indir} not found.")
+        elif self.save_input_to is not None:
+            indir = self.save_input_to
+
         os.makedirs(indir, exist_ok=True)
         os.makedirs(outdir, exist_ok=True)
-        if self.cached_data is not None:
-            indir = self.cached_data
-        self.roots = {self.input_key: indir, self.output_key: outdir}
+        self.workdir = workdir
+        self.indir = indir
+        self.outdir = outdir
 
     @rank_zero_only
-    def init_data(self, dset_cfg, batch_size, num_images):
+    def init_data(self):
         # make the dataset on which the FID will be evaluated
-        dset = instantiate_from_config(dset_cfg)
-        self.data = dset.__class__.__name__
-        if num_images < len(dset):
-            print(f" Reducing the dataset to {num_images} images.")
-            subindices = np.random.choice(np.arange(len(dset)), replace=False, size=(num_images,))
+        data = instantiate_from_config(self.data_cfg)
+        data.prepare_data()
+        data.setup()
+        dset = data.datasets[self.split]
+        self.dset_name = dset.__class__.__name__
+
+        if 0 <= self.num_images < len(dset):
+            subindices = np.random.choice(
+                np.arange(len(dset)), replace=False, size=(self.num_images,)
+            )
             dset = Subset(dset, subindices)
-        else:
-            print(f" num_images ({num_images}) > len(dataset) ({len(dset)}). Using the whole dataset instead.")
+
         self.n_data = len(dset)
-        self.dloader = DataLoader(dset, batch_size=batch_size, drop_last=False, num_workers=batch_size//2,)
+        self.dloader = DataLoader(
+            dset,
+            batch_size=data.batch_size,
+            num_workers=data.num_workers,
+            drop_last=False,
+        )
 
     @rank_zero_only
-    def log_single_img(self, img, fn):
-        img = (img+1.0)/2.0
-        img = img.transpose(0, 1).transpose(1,2).squeeze(-1)
+    def log_single_img(self, img, path):
+        img = (img + 1.) / 2.
+        img = img.transpose(0, 1).transpose(1, 2).squeeze(-1)
         img = img.detach().cpu().numpy()
-        img = (255*img).astype(np.uint8)
-        Image.fromarray(img).save(fn)
+        img = (255 * img).astype(np.uint8)
+        Image.fromarray(img).save(path)
 
-    # TODO: check that metric is not overwritten, additionally also save scores to file
-
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
-        if self.step_freq is not None:
-            if (pl_module.global_step % self.step_freq == 0) and\
-                    (pl_module.global_step >= self.min_steps) and\
-                    (pl_module.global_step not in self.executed_steps):
-                if not self.prepared:
-                    self.prepare(logdir=trainer.logdir)
+    def on_batch_end(self, trainer, pl_module):
+        if self.step_frequency is not None:
+            if (
+                pl_module.global_step % self.step_frequency == 0
+                and pl_module.global_step >= self.min_steps
+                and pl_module.global_step not in self.executed_steps
+            ):
+                self.prepare(logdir=trainer.logdir)
                 self.eval_metrics(pl_module)
                 self.executed_steps.append(pl_module.global_step)
 
-    def on_train_epoch_end(self, trainer, pl_module, outputs):   # or rather do on start?
-        if self.epoch_freq is not None:
-            if pl_module.current_epoch % self.epoch_freq == 0:
-                if not self.prepared:
-                    self.prepare(logdir=trainer.logdir)
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if self.epoch_frequency is not None:
+            if (
+                pl_module.current_epoch % self.epoch_frequency == 0
+                and pl_module.global_step not in self.executed_steps
+            ):
+                self.prepare(logdir=trainer.logdir)
                 self.eval_metrics(pl_module)
+                self.executed_steps.append(pl_module.global_step)
 
     @rank_zero_only
     def eval_metrics(self, pl_module):
+        gs = pl_module.global_step
         is_train = pl_module.training
         if is_train:
             pl_module.eval()
-        keys = [self.input_key, self.output_key]
-        gs = pl_module.global_step
 
-        roots = self.roots.copy()
-        for k in keys:
-            if k == self.input_key:
-                if hasattr(self, "cached_input_dir"):
-                    roots[k] = self.cached_input_dir
-                else:
-                    roots[k] = os.path.join(self.roots[k], f"{gs:09}")
-            else:
-                roots[k] = os.path.join(self.roots[k], f"{gs:09}")
-            os.makedirs(roots[k], exist_ok=True)
+        # Input data is always the same and is thus created only once
+        indir = self.indir
+
+        if self.keep_intermediate:
+            outdir = os.path.join(self.outdir, f"gs-{gs:09}")
+            os.mkdir(outdir) # should not overwrite anything
+        else:
+            outdir = self.outdir # overwrite previous data
+
+        keys = [self.input_key, self.output_key]
+        roots = {self.input_key: indir, self.output_key: outdir}
 
         img_count = {k: 0 for k in keys}
-        for batch in tqdm(self.dloader, desc="Fidelity Scores"):
+        for batch in tqdm(
+            self.dloader,
+            desc="Creating images for fidelity scores",
+            leave=False,
+        ):
             with torch.no_grad():
-                # attention, this requires the log_images method to accept (and actually use) these keys
-                images = pl_module.log_images(batch, keys=keys)
+                # NOTE This requires `log_images` to accept the `to_log` kwarg.
+                #      The return value should be a dict containing the
+                #      input_key and output_key as keys.
+                images = pl_module.log_images(batch, to_log=keys)
 
-            for k in keys:
-                if (k == self.input_key) and hasattr(self, "cached_input_dir"):
+            for k, save_dir in roots.items():
+                if k == self.input_key and (
+                    self.input_cached or self.load_input_from is not None
+                ):
                     continue
-                else:
-                    imgs = images[k]
-                    if self.clamp:
-                        imgs = torch.clamp(imgs, -1., 1.)
-                    for img in imgs:
-                        filename = f"{img_count[k]:06}.png"
-                        filename = os.path.join(roots[k], filename)
-                        self.log_single_img(img, filename)
-                        img_count[k] += 1
-        if not hasattr(self, "cached_input_dir"):
-            self.cached_input_dir = roots[self.input_key]
 
-        scores = calculate_metrics(roots[self.input_key], roots[self.output_key],
-                                   cuda=True, fid=self.fid, isc=self.isc, kid=self.kid, verbose=False)
-        print(f"Fidelity Metrics @ global_step {gs}: \n {scores}")
-        for sk in scores.keys():
-            pl_module.log(sk, scores[sk], logger=True, on_epoch=True)
+                imgs = images[k]
+                if self.clamp:
+                    imgs = torch.clamp(imgs, -1., 1.)
+                for img in imgs:
+                    filepath = os.path.join(save_dir, f"{img_count[k]:06}.png")
+                    self.log_single_img(img, filepath)
+                    img_count[k] += 1
+
+        scores = calculate_metrics(
+            input1=indir,
+            input2=outdir,
+            isc=self.isc,
+            fid=self.fid,
+            kid=self.kid,
+            verbose=False,
+            **self.fid_kwargs
+        )
+
+        # Write scores to csv file and log them
+        csv_path = os.path.join(self.workdir, "fid.csv")
+        with open(csv_path, "a") as f:
+            w = csv.writer(f)
+            if not self.input_cached:
+                # Write header lines
+                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                w.writerow(["timestamp", now])
+                w.writerow(["keys", keys])
+                w.writerow(["step", "num_samples"] + list(scores.keys()))
+            w.writerow([gs, self.n_data] + list(scores.values()))
+
+        for k, v in scores.items():
+            pl_module.log(k, v, logger=True, on_epoch=True)
         if is_train:
             pl_module.train()
+
+        self.input_cached = True # always True after first eval_metrics call
 
 
 class CUDACallback(Callback):
