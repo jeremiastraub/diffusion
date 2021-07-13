@@ -1,33 +1,119 @@
 # autoencoder base configurations
 ---
+convae256_16x16x16_first:
+  target: convae.models.autoencoder.ConvModel
+  params:
+    embed_dim: 16
+    lossconfig:
+      target: convae.modules.losses.contperceptual.LPIPSWithDiscriminator
+      params:
+        disc_start: 50001
+        kl_weight: 1.0e-06
+        disc_weight: 0.5
+    ddconfig:
+      double_z: true
+      z_channels: 16
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult:
+      - 1
+      - 1
+      - 2
+      - 2
+      - 4
+      num_res_blocks: 2
+      attn_resolutions:
+      - 16
+      dropout: 0.0
+    ckpt_path: /export/scratch/rrombach/projects/braket/logs/2021-02-04T11-13-20_imagenetHQ256_16x16x16/checkpoints/last.ckpt
+
 convae256_16x16x16:
-  model:
-    params:
-      ae_config:
-        target: convae.models.autoencoder.ConvModel
-        params:
-          embed_dim: 16
-          lossconfig:
-            target: convae.modules.losses.contperceptual.LPIPSWithDiscriminator
-            params:
-              disc_start: 50001
-              kl_weight: 1.0e-06
-              disc_weight: 0.5
-          ddconfig:
-            double_z: true
-            z_channels: 16
-            resolution: 256
-            in_channels: 3
-            out_ch: 3
-            ch: 128
-            ch_mult:
-            - 1
-            - 1
-            - 2
-            - 2
-            - 4
-            num_res_blocks: 2
-            attn_resolutions:
-            - 16
-            dropout: 0.0
-          ckpt_path: /export/scratch/rrombach/projects/braket/logs/2021-02-04T11-13-20_imagenetHQ256_16x16x16/checkpoints/last.ckpt
+  target: convae.models.autoencoder.ConvModel
+  params:
+    embed_dim: 16
+    lossconfig:
+      target: convae.modules.losses.contperceptual.LPIPSWithDiscriminator
+      params:
+        disc_start: 50001
+        kl_weight: 1.0e-06
+        disc_weight: 0.5
+    ddconfig:
+      double_z: true
+      z_channels: 16
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult:
+      - 1
+      - 1
+      - 2
+      - 2
+      - 4
+      num_res_blocks: 2
+      attn_resolutions:
+      - 16
+      dropout: 0.0
+    ckpt_path: /export/data/rrombach/projects/braket/logs/2021-06-30T22-45-31_convae_openimages_16x16x16/checkpoints/last.ckpt
+
+
+convae256_32x32x4:
+  target: convae.models.autoencoder.ConvModel
+  params:
+    embed_dim: 4
+    lossconfig:
+      target: convae.modules.losses.contperceptual.LPIPSWithDiscriminator
+      params:
+        disc_start: 50001
+        kl_weight: 1.0e-06
+        disc_weight: 0.5
+    ddconfig:
+      double_z: true
+      z_channels: 4
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult:
+      - 1
+      - 2
+      - 4
+      - 4
+      num_res_blocks: 2
+      attn_resolutions: []
+      dropout: 0.0
+    ckpt_path: /export/data/rrombach/projects/braket/logs/2021-06-30T20-11-30_convae_openimages_32x32x4/checkpoints/last.ckpt
+
+
+convae256_8x8x64:
+  target: convae.models.autoencoder.ConvModel
+  params:
+    embed_dim: 64
+    lossconfig:
+      target: convae.modules.losses.contperceptual.LPIPSWithDiscriminator
+      params:
+        disc_start: 50001
+        kl_weight: 1.0e-06
+        disc_weight: 0.5
+    ddconfig:
+      double_z: true
+      z_channels: 64
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult:
+      - 1
+      - 1
+      - 2
+      - 2
+      - 4
+      - 4
+      num_res_blocks: 2
+      attn_resolutions:
+      - 16
+      - 8
+      dropout: 0.0
+    ckpt_path: /export/data/rrombach/projects/braket/logs/2021-06-30T22-19-36_convae_openimages_8x8x64/checkpoints/last.ckpt

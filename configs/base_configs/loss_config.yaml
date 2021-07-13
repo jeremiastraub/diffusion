@@ -1,26 +1,17 @@
 # Loss base configurations
 ---
 SDELoss:
-  model:
-    params:
-      loss_config:
-        target: ncsn.modules.losses.sde_loss.SDELoss
-        params:
-          likelihood_weighting: False
-          reduce_mean: True
+  target: ncsn.modules.losses.sde_loss.SDELoss
+  params:
+    likelihood_weighting: False
+    reduce_mean: True
 
 DDPMLoss:
-  model:
-    params:
-      loss_config:
-        target: ncsn.modules.losses.ddpm_loss.DDPMLoss
-        params:
-          reduce_mean: True
+  target: ncsn.modules.losses.ddpm_loss.DDPMLoss
+  params:
+    reduce_mean: True
 
 SMLDLoss:
-  model:
-    params:
-      loss_config:
-        target: ncsn.modules.losses.smld_loss.SMLDLoss
-        params:
-          reduce_mean: True
+  target: ncsn.modules.losses.smld_loss.SMLDLoss
+  params:
+    reduce_mean: True

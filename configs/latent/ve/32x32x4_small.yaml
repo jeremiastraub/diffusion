@@ -1,37 +1,32 @@
-# LSUN outdoor churches
+# Using an autoencode with latent dimensions 32x32x4 (HxWxC)
 ---
 based_on:
-  - data.LSUNchurch256
-  - ae_config.convae256_16x16x16
-  - sde_config.VESDE
-  - loss_config.SDELoss
+  data: data.LSUNchurch256
+  model.params.ae_config: ae_config.convae256_32x32x4
+  model.params.sde_config: sde_config.VESDE
+  model.params.loss_config: loss_config.SDELoss
 
 lightning:
   callbacks:
     image_logger:
       params:
-        batch_frequency: 3900
-        increase_log_steps: False
-
-data:
-  params:
-    batch_size: 32
-    num_workers: 8
+        batch_frequency: 4000 # scales with the inverse batch-size
+        use_exponential_steps: False
+        min_steps: 5
 
 model:
-  base_learning_rate: 1.5625e-06 #2e-4 # TODO will be scaled by batch size already
+  base_learning_rate: 1.25e-5
   target: ncsn.models.scorebased.ScoreBasedModel
   params:
-    ckpt_path: /export/scratch/jtraub/logs/ncsn/2021-06-25T13-17-30_lsun_vesde_small/checkpoints/last.ckpt
     ncsn_config:
       target: ncsn.modules.ncsns.ncsnpp.NCSNpp
       params:
-        in_channels: 16
+        in_channels: 4
         ch: 128
         ch_mult: [1, 4, 4]
         num_res_blocks: 2
-        resolution: 16
-        attn_resolutions: [8, 4]
+        resolution: 32
+        attn_resolutions: [16, 8]
         resblock_type: biggan
         nonlinearity: swish
         embedding_type: fourier
@@ -48,10 +43,10 @@ model:
     sampling_kwargs:
       sampling_method: pc
       predictor: reverse_diffusion
-      corrector: none
+      corrector: langevin
       n_steps_each: 1
-      shape: [1, 16, 16, 16]
+      shape: [2, 4, 32, 32]
       eps: 1e-5
       snr: 0.16
-      noise_removal: False
+      noise_removal: True
       continuous: True
