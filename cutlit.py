@@ -134,15 +134,29 @@ def get_parser(**parser_kwargs):
 
 def resolve_based_on(cfg, root: str = "configs/base_configs"):
     """Resolve any based_on entries in the configuration by updating the base
-    configuration recursively.
+    configuration recursively. The updating is done via OmegaConf.merge.
 
-    based_on can be
+    The ``based_on`` entry in ``cfg`` can be
         - str: "<path>.<key1>.<key...>"; <path> specifies the path the to base
             configuration file relative to `root` (_without_ the .yaml file
-            extension). Append keys to select specific entries within the cfg
-        - Tuple[str]: list of such strings. They will be parsed sequentially.
+            extension). Append keys to select specific entries within that cfg.
+        - list[str]: list of such strings. They will be parsed sequentially.
+        - dict (recommended): target path strings keyed by a base-key.
+            Prepends the base-keys as top-level keys to the target base
+            configurations. base-keys may contain multiple keys separated by
+            a ".".
+            For example
+            ```
+            based_on:
+              foo.bar: config_file.some_key
+            ```
+            will be translated into
+            ```
+            foo:
+              bar: <config_file.some_key-dictionary>
+            ```
     """
-    def _resolve_single_ref(cfg, based_on):
+    def _resolve_single_ref(cfg, based_on, *, base_key=None):
         split = based_on.split(".", 1)
         if len(split) == 1:
             file, keys = split[0], []
@@ -162,22 +176,37 @@ def resolve_based_on(cfg, root: str = "configs/base_configs"):
                 "of 'based_on' in this way is not supported."
             )
 
-        return OmegaConf.merge(base, cfg)
+        if base_key is not None:
+            base_keys = base_key.split(".")
+
+            def nested(keys):
+                """Turn list of keys into nested dict"""
+                return {keys.pop(0): nested(keys)} if keys else {**base}
+
+            return OmegaConf.merge(nested(base_keys), cfg)
+        else:
+            return OmegaConf.merge(base, cfg)
 
     based_on = cfg.pop("based_on", None)
 
     if based_on is None:
         return cfg
 
-    else:
-        if isinstance(based_on, str):
-            return _resolve_single_ref(cfg, based_on)
+    elif isinstance(based_on, str):
+        return _resolve_single_ref(cfg, based_on)
 
-        else:
-            updated_cfg = cfg.copy()
-            for k in based_on:
-                updated_cfg = _resolve_single_ref(updated_cfg, k)
-            return updated_cfg
+    elif isinstance(based_on, list):
+        updated_cfg = cfg.copy()
+        for b in based_on:
+            updated_cfg = _resolve_single_ref(updated_cfg, b)
+        return updated_cfg
+
+    else:
+        # dict-like based_on
+        updated_cfg = cfg.copy()
+        for k, b in based_on.items():
+            updated_cfg = _resolve_single_ref(updated_cfg, b, base_key=k)
+        return updated_cfg
 
 
 def nondefault_trainer_args(opt):
@@ -866,9 +895,9 @@ if __name__ == "__main__":
     try:
         # init and save configs
         configs = [OmegaConf.load(cfg) for cfg in opt.base]
-        configs = [resolve_based_on(cfg) for cfg in configs]
         cli = OmegaConf.from_dotlist(unknown)
         config = OmegaConf.merge(*configs, cli)
+        config = resolve_based_on(config)
         lightning_config = config.pop("lightning", OmegaConf.create())
         # merge trainer cli with config
         trainer_config = lightning_config.get("trainer", OmegaConf.create())
