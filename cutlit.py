@@ -366,6 +366,7 @@ class ImageLogger(Callback):
         }
         self.use_exponential_steps = use_exponential_steps
         self.current_exponent = None
+        self.executed_steps = list()
         self.clamp = clamp
         self.log_on_batch_idx = log_on_batch_idx
         self.log_kwargs = log_kwargs
@@ -421,7 +422,14 @@ class ImageLogger(Callback):
                     0 if pl_module.global_step == 0
                     else int(np.log2(pl_module.global_step)) + 1
                 )
-        if (self.check_frequency(check_idx) and self.max_images > 0):
+        if (
+            self.max_images > 0
+            and self.check_frequency(check_idx)
+            # only one logging step per global-step when using
+            # accumulate_grad_batches > 1
+            and pl_module.global_step not in self.executed_steps
+        ):
+            self.executed_steps.append(pl_module.global_step)
             logger = type(pl_module.logger)
             is_train = pl_module.training
             if is_train:
@@ -553,6 +561,7 @@ class FIDelity(Callback):
         fid=True,
         epoch_frequency=1,
         step_frequency=None,
+        min_epochs=1,
         min_steps=0,
         input_key="inputs",
         output_key="samples",
@@ -560,6 +569,7 @@ class FIDelity(Callback):
         save_input_to=None,
         clamp=True,
         keep_intermediate_output=False,
+        log_images_kwargs=None,
         **fid_kwargs
     ):
         """Callback for evaluating and logging FID, IS, etc.
@@ -575,8 +585,10 @@ class FIDelity(Callback):
             data_cfg: cutlit.DataModuleFromConfig configuration. Passed to
                 cutlit.instantiate_from_config.
             split: dset split to use, can be one of: train, validation, test.
-            num_images: Number of images to use for score evaluation. If < 0,
-                the whole dataset split is used.
+            num_images: Number of images contained in the dataset configured by
+                ``data_cfg``. If < 0, the whole dataset split is used.
+                Note that the effective number of created images depends on the
+                number of images returned by the pl_module.log_images method.
             isc: Whether to calculate the Inception Score
             kid: Whether to calculate the Kernel Inception Distance
             fid: Whether to calculate the Frechet Inception Distance
@@ -584,6 +596,8 @@ class FIDelity(Callback):
                 None to disable epoch-periodic evaluation.
             step_frequency: Number of steps between score evaluations. Set to
                 None to disable step-periodic evaluation.
+            min_epochs: If epoch-periodic evaluation is enabled, defines
+                starting threshold.
             min_steps: If step-periodic evaluation is enabled, defines starting
                 threshold.
             input_key: Input image logging key
@@ -593,6 +607,7 @@ class FIDelity(Callback):
             save_input_to: Custom path to directory where the input images are
                 written to. May not be given together with load_input_from.
             clamp: Whether to clamp images to [0, 1]
+            log_images_kwargs: Passed to pl_module.log_images
             keep_intermediate_output: Whether to store output images for each
                 evaluation separately. If False, overwrites previous outputs.
             **fid_kwargs: Passed to torch_fidelity.calculate_metrics
@@ -605,6 +620,7 @@ class FIDelity(Callback):
         self.output_key = output_key
         self.epoch_frequency = epoch_frequency
         self.step_frequency = step_frequency
+        self.min_epochs = min_epochs
         self.min_steps = min_steps
         assert not (load_input_from is not None and save_input_to is not None)
         self.load_input_from = load_input_from
@@ -615,6 +631,7 @@ class FIDelity(Callback):
         self.kid = kid
         self.fid = fid
         self.clamp = clamp
+        self.log_images_kwargs = log_images_kwargs or {}
         self.fid_kwargs = fid_kwargs
 
         self.prepared = False
@@ -694,6 +711,7 @@ class FIDelity(Callback):
         if self.epoch_frequency is not None:
             if (
                 pl_module.current_epoch % self.epoch_frequency == 0
+                and pl_module.current_epoch >= self.min_epochs
                 and pl_module.global_step not in self.executed_steps
             ):
                 self.prepare(logdir=trainer.logdir)
@@ -729,7 +747,9 @@ class FIDelity(Callback):
                 # NOTE This requires `log_images` to accept the `to_log` kwarg.
                 #      The return value should be a dict containing the
                 #      input_key and output_key as keys.
-                images = pl_module.log_images(batch, to_log=keys)
+                images = pl_module.log_images(
+                    batch, to_log=keys, **self.log_images_kwargs
+                )
 
             for k, save_dir in roots.items():
                 if k == self.input_key and (
