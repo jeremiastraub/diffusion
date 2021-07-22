@@ -7,8 +7,8 @@ import torch
 import pytorch_lightning as pl
 
 from cutlit import instantiate_from_config
-from ..modules.sde.sampling import get_sampling_fn
-from ..modules.ema.ema import LitEma
+from ..modules.sde import get_sampling_fn
+from ..modules.ema import LitEma
 
 # -----------------------------------------------------------------------------
 
@@ -31,7 +31,28 @@ class ScoreBasedModel(pl.LightningModule):
         ignore_keys = None,
         use_ema = True,
     ):
-        """"""
+        """Score-based generative model trained on images or on their latent
+        representation given a fixed autoencoder model. Bases on the
+        SDE-framework by Song et al., 2020.
+
+        All *_config arguments are passed to cutlit.instantiate_from_config.
+
+        Args:
+            ncsn_config: Configuration of the noise conditional score network
+            loss_config: Loss configuration
+            sde_config: SDE configuration
+            ae_config: Autoencoder configuration. Make sure to specify the
+                ckpt_path kwarg. The autoencoder model is not trained.
+            optimizer_kwargs: Passed to torch.optim.Adam
+            lr_scheduler_kwargs: Configures a learning rate scheduler
+            ema_kwargs: Passed to LitEma
+            sampling_kwargs: Default sampling kwargs, passed to get_sampling_fn
+            image_key: The key with which to retreive the input image from a
+                batch.
+            ckpt_path: Restore model parameters from a checkpoint file
+            ignore_keys: If ckpt_path given, ignores these state_dict keys
+            use_ema: Whether to use EMA for model parameters
+        """
         super().__init__()
 
         # TODO Find a cleaner way to do this
@@ -124,7 +145,6 @@ class ScoreBasedModel(pl.LightningModule):
 
     def get_input(self, batch, image_key, device=None):
         """"""
-        # TODO If using ae_model, use its get_input method?
         x = batch[image_key]
         if len(x.shape) == 3:
             x = x[None, ...]
@@ -132,14 +152,11 @@ class ScoreBasedModel(pl.LightningModule):
             memory_format=torch.contiguous_format
         ).float()
 
-        # TODO can be omitted?
         if device is not None:
             x = x.to(device)
 
         if self.ae_model is not None:
-            # TODO omit torch.no_grad if requires_grad=False?
-            with torch.no_grad():
-                x = self.ae_model.encode(x).sample()
+            x = self.ae_model.encode(x).sample()
 
         return x
 
@@ -204,7 +221,7 @@ class ScoreBasedModel(pl.LightningModule):
         batch,
         *,
         to_log=("samples", "reconstructions"),
-        num_samples=None,
+        sampling_kwargs=None,
         **kwargs
     ):
         """Log images.
@@ -213,8 +230,7 @@ class ScoreBasedModel(pl.LightningModule):
             batch: current batch
             to_log: Iterable containing the image logging keys. Available keys:
                 samples, reconstructions, inputs.
-            num_samples: When logging samples, number of samples to create.
-                If not None, overwrites the ``shape`` sampling kwarg.
+            sampling_kwargs: Passed to ``self.sample``
             **kwargs: unused, but required for cutlit compatibility
 
         Returns: log dict containing images keyed by logging key
@@ -231,7 +247,7 @@ class ScoreBasedModel(pl.LightningModule):
         log = dict()
 
         if "samples" in to_log:
-            samples = self.sample(num_samples=num_samples)
+            samples = self.sample(**(sampling_kwargs or {}))
             log["samples"] = samples
 
         if "inputs" in to_log:

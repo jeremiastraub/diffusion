@@ -2,7 +2,7 @@
 
 import torch
 
-from .sde.sde import VESDE, VPSDE, subVPSDE
+from .sde import VESDE, VPSDE, subVPSDE
 
 # -----------------------------------------------------------------------------
 

@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from ..sde.sde import VPSDE, VESDE, subVPSDE, SDE
+from ..sde import VPSDE, VESDE, subVPSDE, SDE
 
 # -----------------------------------------------------------------------------
 
@@ -63,13 +63,11 @@ class SDELoss(nn.Module):
             # The maximum value of time embedding is assumed to 999 for
             # continuously-trained models.
             labels = t * 999
-            std = sde.marginal_prob(torch.zeros_like(x), t)[1]
             score = - model(perturbed_data, labels) / std[:, None, None, None]
 
         elif isinstance(sde, VESDE):
             # For VE-trained models, t=0 corresponds to the highest noise level
-            labels = sde.marginal_prob(torch.zeros_like(x), t)[1]
-            score = model(perturbed_data, labels)
+            score = model(perturbed_data, std)
 
         else:
             raise ValueError(

@@ -8,8 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from ..layers.layers import (
-    AttnBlock, Upsample, Downsample, ResnetBlockBigGAN, conv3x3
+from ..layers import (
+    AttentionBlock, Upsample, Downsample, ResnetBlockBigGAN, zero_module
 )
 
 # -----------------------------------------------------------------------------
@@ -98,47 +98,21 @@ class NCSNpp(nn.Module):
         num_res_blocks: int,
         resolution: int,
         attn_resolutions: Tuple[int],
-        resblock_type: str = "biggan",
+        num_heads: int = 1,
+        num_ch_per_head: int = None,
         nonlinearity: str = "silu",
         embedding_type: str = "fourier",
         fourier_scale: float = 16.,
-        time_conditional: bool = True,
+        resample_with_resblock: bool = True,
         resample_with_conv: bool = True,
-        fir: bool = True,
-        fir_kernel: Tuple[int] = (1, 3, 3, 1),
-        weight_init_scale: float = 0.,
         scale_by_sqrt2: bool = True,
         scale_output_by_sigma: bool = True,
-        dropout: float = 0.1,
+        dropout: float = 0.,
         sigma_min: float = 0.01,
         sigma_max: float = 50,
         num_scales: int = 1000
     ):
-        """
-
-        Args:
-            in_channels:
-            ch:
-            ch_mult:
-            num_res_blocks:
-            resolution:
-            attn_resolutions:
-            resblock_type:
-            nonlinearity:
-            embedding_type:
-            fourier_scale:
-            time_conditional:
-            resample_with_conv:
-            fir:
-            fir_kernel:
-            weight_init_scale:
-            scale_by_sqrt2:
-            scale_output_by_sigma:
-            dropout:
-            sigma_min:
-            sigma_max:
-            num_scales:
-        """
+        """"""
         super().__init__()
         self.act = get_act(nonlinearity)
         self.scale_output_by_sigma = scale_output_by_sigma
@@ -173,66 +147,49 @@ class NCSNpp(nn.Module):
             )
 
         # Explicitly condition on time step
-        if time_conditional:
-            self.time_conditioning.append(nn.Linear(embed_dim, 4 * ch))
-            self.time_conditioning.append(nn.Linear(4 * ch, 4 * ch))
+        self.time_conditioning.append(nn.Linear(embed_dim, 4 * ch))
+        self.time_conditioning.append(self.act)
+        self.time_conditioning.append(nn.Linear(4 * ch, 4 * ch))
 
-            # Use custom weights and bias initialization
-            # for i in [-1, -2]:
-            #     self.time_conditioning[i].weight.data = init_weights(
-            #         self.time_conditioning[i].weight.shape
-            #     )
-            #     nn.init.zeros_(self.time_conditioning[i].bias)
+        # Use custom weights and bias initialization
+        # for i in [-1, -2]:
+        #     self.time_conditioning[i].weight.data = init_weights(
+        #         self.time_conditioning[i].weight.shape
+        #     )
+        #     nn.init.zeros_(self.time_conditioning[i].bias)
 
         self.time_conditioning = nn.Sequential(*self.time_conditioning)
 
         _AttnBlock = functools.partial(
-            AttnBlock,
-            init_scale=weight_init_scale,
+            AttentionBlock,
+            num_heads=num_heads,
+            num_ch_per_head=num_ch_per_head,
+            scale_by_sqrt2=scale_by_sqrt2,
+        )
+        _ResnetBlock = functools.partial(
+            ResnetBlockBigGAN,
+            act=self.act,
+            emb_dim=4 * ch,
+            dropout=dropout,
             scale_by_sqrt2=scale_by_sqrt2,
         )
 
-        _Upsample = functools.partial(
-            Upsample,
-            with_conv=resample_with_conv,
-            fir=fir,
-            fir_kernel=fir_kernel,
-        )
-
-        _Downsample = functools.partial(
-            Downsample,
-            with_conv=resample_with_conv,
-            fir=fir,
-            fir_kernel=fir_kernel,
-        )
-
-        if resblock_type.lower() == "ddpm":
-            raise NotImplementedError()
-            # resnet = functools.partial(
-            #     ResnetBlockDDPM,
-            #     act=self.act,
-            #     dropout=dropout,
-            #     init_scale=weight_init_scale,
-            #     scale_by_sqrt2=scale_by_sqrt2,
-            #     temb_dim=4 * ch,
-            # )
-        elif resblock_type.lower() == "biggan":
-            _ResnetBlock = functools.partial(
-                ResnetBlockBigGAN,
-                act=self.act,
-                dropout=dropout,
-                fir=fir,
-                fir_kernel=fir_kernel,
-                init_scale=weight_init_scale,
-                scale_by_sqrt2=scale_by_sqrt2,
-                temb_dim=4 * ch,
+        if resample_with_resblock:
+            _Upsample = functools.partial(
+                _ResnetBlock, up=True
+            )
+            _Downsample = functools.partial(
+                _ResnetBlock, down=True
             )
         else:
-            raise ValueError(
-                f"resblock_type must be 'biggan' or 'ddpm, was {resblock_type}"
+            _Upsample = functools.partial(
+                Upsample, with_conv=resample_with_conv
+            )
+            _Downsample = functools.partial(
+                Downsample, with_conv=resample_with_conv
             )
 
-        self.conv_in = conv3x3(in_channels, ch)
+        self.conv_in = nn.Conv2d(in_channels, ch, 3, padding=1)
 
         # Downsampling
         self.down = nn.ModuleList()
@@ -254,20 +211,19 @@ class NCSNpp(nn.Module):
                 in_ch = out_ch
 
             if level != self.num_resolutions - 1:
-                #
-                # stage.downsample = _Downsample(in_ch=in_ch)
-                #
-                stage.downsample = _ResnetBlock(in_ch=in_ch, down=True)
+                stage.downsample = _Downsample(in_ch=in_ch)
                 current_res = current_res // 2
                 h_channels.append(in_ch)
 
             self.down.append(stage)
 
         # Mid
-        self.mid = nn.Sequential(
-            _ResnetBlock(in_ch=in_ch),
-            _AttnBlock(channels=in_ch),
-            _ResnetBlock(in_ch=in_ch),
+        self.mid = nn.ModuleList(
+            [
+                _ResnetBlock(in_ch=in_ch),
+                _AttnBlock(channels=in_ch),
+                _ResnetBlock(in_ch=in_ch),
+            ]
         )
 
         # Upsampling
@@ -290,10 +246,7 @@ class NCSNpp(nn.Module):
                 in_ch = out_ch
 
             if level != 0:
-                #
-                # stage.upsample = _Upsample(in_ch=in_ch)
-                #
-                stage.upsample = _ResnetBlock(in_ch=in_ch, up=True)
+                stage.upsample = _Upsample(in_ch=in_ch)
                 current_res = current_res * 2
 
             self.up.append(stage)
@@ -302,11 +255,10 @@ class NCSNpp(nn.Module):
 
         self.conv_out = nn.Sequential(
             nn.GroupNorm(
-                num_groups=min(in_ch // 4, 32),
-                num_channels=in_ch,
-                eps=1e-6
+                num_groups=min(in_ch // 4, 32), num_channels=in_ch, eps=1e-6
             ),
-            conv3x3(in_ch, in_channels, init_scale=weight_init_scale),
+            self.act,
+            zero_module(nn.Conv2d(in_ch, in_channels, 3, padding=1)),
         )
 
         _lat_res = resolution // 2**(self.num_resolutions - 1)
@@ -318,7 +270,7 @@ class NCSNpp(nn.Module):
 
     def forward(self, x, time_cond):
 
-        t_emb = self.time_conditioning(time_cond)
+        emb = self.time_conditioning(time_cond)
 
         h = self.conv_in(x)
 
@@ -328,33 +280,37 @@ class NCSNpp(nn.Module):
         hs.append(h)
         for stage in self.down:
             for block in stage.main:
-                if stage.uses_attn and isinstance(block, AttnBlock):
+                if stage.uses_attn and isinstance(block, AttentionBlock):
                     # AttnBlock
                     h = block(h)
                 else:
                     # ResBlock
-                    h = block(h, t_emb)
+                    h = block(h, emb)
                     hs.append(h)
 
             if hasattr(stage, "downsample"):
-                h = stage.downsample(h, t_emb)
+                h = stage.downsample(h, emb)
                 hs.append(h)
 
         # Mid
-        h = self.mid(h)
+        for block in self.mid:
+            if isinstance(block, AttentionBlock):
+                h = block(h)
+            else:
+                h = block(h, emb)
 
         # Upsample
         for stage in self.up:
             for block in stage.main:
-                if stage.uses_attn and isinstance(block, AttnBlock):
+                if stage.uses_attn and isinstance(block, AttentionBlock):
                     # AttnBlock
                     h = block(h)
                 else:
                     # ResBlock, skip-connection via concatenation
-                    h = block(torch.cat([h, hs.pop()], dim=1), t_emb)
+                    h = block(torch.cat([h, hs.pop()], dim=1), emb)
 
             if hasattr(stage, "upsample"):
-                h = stage.upsample(h, t_emb)
+                h = stage.upsample(h, emb)
 
         assert not hs
 
