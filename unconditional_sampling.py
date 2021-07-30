@@ -290,6 +290,8 @@ def run_sampling(model):
             )
         )
 
+    animate = False
+
     with col_left, st.form(key="sampling_config"):
         # PC-sampling configuration
         if sampling_method == "PC (predictor-corrector)":
@@ -306,44 +308,50 @@ def run_sampling(model):
             corrector = st.selectbox(
                 "Corrector", ("langevin", "ald", "none")
             )
-            n_steps_each = st.slider(
+            n_steps_each = st.number_input(
                 "corrector steps per predictor step",
                 min_value=1,
                 max_value=5,
-                value=2,
-                step=1,
+                value=1,
             )
-            snr = st.slider(
+            snr = st.number_input(
                 "snr",
                 min_value=0.05,
                 max_value=0.25,
                 value=0.16,
                 step=0.01,
-                help="signal to noise ratio"
+                help="signal to noise ratio",
             )
             denoise = st.checkbox("denoise", value=True)
-            num_samples = st.slider(
-                "number of samples", min_value=1, max_value=16, step=1, value=1
+            num_samples = st.number_input(
+                "number of samples", min_value=1, max_value=16, value=1
             )
+
+            class_idx = None
+            if model.class_conditional:
+                class_idx = st.number_input(
+                    "Class Index",
+                    min_value=0,
+                    max_value=model.score_model.num_classes - 1,
+                    value=0,
+                )
+                choose_random_class = st.checkbox(
+                    "Choose class randomly", value=True
+                )
+
             # continuous = st.radio("continuous", (True, False))
             animate = st.checkbox("animate", value=True)
             anim_info = st.empty()
-            if animate:
-                if num_samples != 1:
-                    anim_info = st.info(
-                        "Animation will be done for a single sample only"
-                    )
-                    num_samples = 1
-
-                update_every = st.number_input(
-                    "Animation frame update frequency",
-                    min_value=1,
-                    max_value=model.sde.N,
-                    value=10,
-                )
-                save_mp4 = st.checkbox(
-                    "save as .mp4 file (fps=25)", value=False
-                )
+            st.write("Animation options")
+            update_every = st.number_input(
+                "Animation frame update frequency",
+                min_value=1,
+                max_value=model.sde.N,
+                value=10,
+            )
+            save_mp4 = st.checkbox(
+                "save as .mp4 file (fps=25)", value=False
+            )
 
         # ODE-sampling configuration
         elif sampling_method == "ODE":
@@ -371,9 +379,21 @@ def run_sampling(model):
                 help="absolute tolerance",
             )
             denoise = st.checkbox("denoise", value=True)
-            num_samples = st.slider(
-                "number of samples", min_value=1, max_value=16, step=1, value=1
+            num_samples = st.number_input(
+                "number of samples", min_value=1, max_value=16, value=1
             )
+
+            class_idx = None
+            if model.class_conditional:
+                class_idx = st.number_input(
+                    "Class Index",
+                    min_value=0,
+                    max_value=model.score_model.num_classes - 1,
+                    value=0,
+                )
+                choose_random_class = st.checkbox(
+                    "Choose class randomly", value=True
+                )
 
         # Latent Gaussian sampling configuration
         else:
@@ -385,6 +405,13 @@ def run_sampling(model):
 
     # Sampling button action
     if button_sample:
+        if model.class_conditional and choose_random_class:
+            class_idx = torch.randint(
+                model.score_model.num_classes,
+                size=(num_samples,),
+                device=model.device,
+            )
+
         # For an accurate timing, would need to time within the actual
         # sampling loops.
         sample_start = time.time()
@@ -396,13 +423,16 @@ def run_sampling(model):
                 output = col_right.empty()
                 if save_mp4:
                     import imageio
-                    outvid = "sampling.mp4"
+                    outdir = "streamlit-data"
+                    os.makedirs(outdir, exist_ok=True)
+                    outvid = os.path.join(outdir, "sampling.mp4")
                     writer = imageio.get_writer(outvid, fps=25)
 
             for i, sample in enumerate(
                 stqdm(
                     model._sampling_generator(
                         last_only=not animate,
+                        class_idx=class_idx,
                         sampling_method="pc",
                         num_samples=num_samples,
                         predictor=predictor,
@@ -425,11 +455,26 @@ def run_sampling(model):
                         bchw_to_st(sample), clamp=True, output_format="PNG"
                     )
                     if save_mp4:
-                        writer.append_data(
-                            (bchw_to_st(sample)[0]*255).clip(0, 255).astype(
-                                np.uint8
-                            )
+                        frame = (bchw_to_st(sample) * 255).clip(0, 255).astype(
+                            np.uint8
                         )
+                        b, h, w, c = frame.shape
+                        if b == 1:
+                            frame = frame[0]
+                        elif b % 2 == 0:
+                            ncol = int(b / 2)
+                            frame = np.concatenate(
+                                [
+                                    np.concatenate(
+                                        frame[row*ncol:row*ncol+ncol], axis=1
+                                    )
+                                    for row in range(int(b / (b / 2)))
+                                ],
+                                axis=0,
+                            )
+                        else:
+                            frame = np.concatenate(frame, axis=1)
+                        writer.append_data(frame)
                 else:
                     # Iterate all the way to the end to get the final sample
                     pass
@@ -439,15 +484,18 @@ def run_sampling(model):
                 st.session_state.sampling_video = outvid
 
             st.session_state.sample = sample
-            # Skip showing the final sample later again, because it's already
-            # shown when animating the sampling.
-            st.session_state.skip_show_sample = True
+
+            if animate:
+                # Skip showing the final sample later again, because it's
+                # already shown when animating the sampling.
+                st.session_state.skip_show_sample = True
 
         elif sampling_method == "ODE":
-            with col_right.spinner("Solving the reverse ODE ..."):
+            with col_right, st.spinner("Solving the reverse ODE ..."):
                 st.session_state.sample = model.sample(
                     sampling_method="ode",
                     num_samples=num_samples,
+                    class_idx=class_idx,
                     noise_removal=denoise,
                     ode_method=ode_method,
                     ode_rtol=ode_rtol,
@@ -455,6 +503,7 @@ def run_sampling(model):
                 )
 
         else:
+            # TODO Don't hardcode the shape
             z = (torch.randn((1, 16, 16, 16)) * latent_std).to(model.device)
             st.session_state.sample = model.ae_model.decode(z)
 
@@ -479,6 +528,12 @@ def run_sampling(model):
         col_right.write(
             f"Sampling time: < {st.session_state.sampling_time:.1f} s"
         )
+        if animate:
+            col_right.write(
+                "The sampling time might be strongly overestimated. To get a "
+                "more precise estimate of the sampling time, switch off "
+                "animation."
+            )
 
     if st.session_state.get("sampling_video", None) is not None:
         col_right.subheader("Sampling video")

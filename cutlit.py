@@ -766,8 +766,8 @@ class FIDelity(Callback):
                     img_count[k] += 1
 
         scores = calculate_metrics(
-            input1=indir,
-            input2=outdir,
+            input1=outdir,
+            input2=indir,
             isc=self.isc,
             fid=self.fid,
             kid=self.kid,
