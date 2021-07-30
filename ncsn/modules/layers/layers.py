@@ -161,6 +161,7 @@ class ResnetBlockBigGAN(nn.Module):
         in_ch: int,
         out_ch: int = None,
         emb_dim: int = None,
+        use_adaptive_group_norm = False,
         dropout: float = 0.,
         scale_by_sqrt2: bool = True,
         down: bool = False,
@@ -173,6 +174,8 @@ class ResnetBlockBigGAN(nn.Module):
             in_ch: Number of input channels
             out_ch: Number of output channels
             emb_dim: Embedding dimensionality
+            use_adaptive_group_norm: Whether to use AdaGN to incorporate
+                conditioning information [Dhariwal & Nichol, 2021].
             dropout: Dropout probability
             scale_by_sqrt2: Whether to scale output by 1/sqrt(2)
             down: Whether to use this block for upsampling
@@ -180,6 +183,7 @@ class ResnetBlockBigGAN(nn.Module):
         """
         super().__init__()
         out_ch = out_ch if out_ch is not None else in_ch
+        self.use_adaptive_group_norm = use_adaptive_group_norm
         self.scale_by_sqrt2 = scale_by_sqrt2
         self.up_or_down = up or down
         assert not (up and down)
@@ -202,7 +206,9 @@ class ResnetBlockBigGAN(nn.Module):
         )
         self.emb_layers = nn.Sequential(
             act,
-            nn.Linear(emb_dim, out_ch),
+            nn.Linear(
+                emb_dim, 2 * out_ch if self.use_adaptive_group_norm else out_ch
+            ),
         )
         self.out_layers = nn.Sequential(
             nn.GroupNorm(
@@ -234,7 +240,13 @@ class ResnetBlockBigGAN(nn.Module):
         while len(emb_out.shape) < len(h.shape):
             emb_out = emb_out[..., None]
 
-        h = self.out_layers(h + emb_out)
+        if self.use_adaptive_group_norm:
+            out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
+            scale, shift = torch.chunk(emb_out, 2, dim=1)
+            h = out_norm(h) * (1. + scale) + shift
+            h = out_rest(h)
+        else:
+            h = self.out_layers(h + emb_out)
 
         if self.scale_by_sqrt2:
             return (self.skip_connection(x) + h) * (1. / np.sqrt(2))
