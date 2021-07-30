@@ -38,13 +38,14 @@ class SDELoss(nn.Module):
             else lambda *args, **kwargs: torch.sum(*args, **kwargs)
         )
 
-    def forward(self, x, model, sde: SDE):
+    def forward(self, x, model, sde: SDE, y=None):
         """Evaluate the loss.
 
         Args:
             x: mini-batch input data
             model: SDE model instance
             sde: SDE instance
+            y: (class) conditioning
 
         Returns: loss
         """
@@ -62,12 +63,15 @@ class SDELoss(nn.Module):
             # For VP-trained models, t=0 corresponds to the lowest noise level.
             # The maximum value of time embedding is assumed to 999 for
             # continuously-trained models.
-            labels = t * 999
-            score = - model(perturbed_data, labels) / std[:, None, None, None]
+            t_cond = t * 999
+            score = (
+                - model(perturbed_data, t_cond, y=y)
+                / std[:, None, None, None]
+            )
 
         elif isinstance(sde, VESDE):
             # For VE-trained models, t=0 corresponds to the highest noise level
-            score = model(perturbed_data, std)
+            score = model(perturbed_data, std, y=y)
 
         else:
             raise ValueError(

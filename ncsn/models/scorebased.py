@@ -27,6 +27,7 @@ class ScoreBasedModel(pl.LightningModule):
         ema_kwargs = None,
         sampling_kwargs = None,
         image_key = "image",
+        cond_key = "class_label",
         ckpt_path: str = None,
         ignore_keys = None,
         use_ema = True,
@@ -49,6 +50,8 @@ class ScoreBasedModel(pl.LightningModule):
             sampling_kwargs: Default sampling kwargs, passed to get_sampling_fn
             image_key: The key with which to retreive the input image from a
                 batch.
+            cond_key: The key with which to retreive the conditioning
+                information from a batch.
             ckpt_path: Restore model parameters from a checkpoint file
             ignore_keys: If ckpt_path given, ignores these state_dict keys
             use_ema: Whether to use EMA for model parameters
@@ -74,6 +77,10 @@ class ScoreBasedModel(pl.LightningModule):
             ["sigma_min", "sigma_max", "N / num_scales"]
         ):
             assert p1 == p2, f"{name} parameters do not match!"
+
+        self.class_conditional = (
+            ncsn_config["params"].get("num_classes", None) is not None
+        )
 
         self.score_model = instantiate_from_config(ncsn_config)
         self.loss = instantiate_from_config(loss_config)
@@ -103,6 +110,7 @@ class ScoreBasedModel(pl.LightningModule):
         )
 
         self.image_key = image_key
+        self.cond_key = cond_key
 
         if ckpt_path is not None:
             self.init_from_ckpt(ckpt_path, ignore_keys)
@@ -143,7 +151,7 @@ class ScoreBasedModel(pl.LightningModule):
                 if verbose:
                     print("--ema-scope: Restored training weights")
 
-    def get_input(self, batch, image_key, device=None):
+    def get_input(self, batch, image_key, cond_key=None, device=None):
         """"""
         x = batch[image_key]
         if len(x.shape) == 3:
@@ -158,7 +166,8 @@ class ScoreBasedModel(pl.LightningModule):
         if self.ae_model is not None:
             x = self.ae_model.encode(x).sample()
 
-        return x
+        y = None if cond_key is None else batch[cond_key]
+        return x, y
 
     def forward(self, x):
         raise NotImplementedError(
@@ -168,9 +177,15 @@ class ScoreBasedModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         """"""
-        inputs = self.get_input(batch, self.image_key)
+        inputs, conditioning = self.get_input(
+            batch,
+            self.image_key,
+            cond_key=self.cond_key if self.class_conditional else None,
+        )
 
-        loss = self.loss(inputs, model=self.score_model, sde=self.sde)
+        loss = self.loss(
+            inputs, model=self.score_model, sde=self.sde, y=conditioning
+        )
         self.log(
             "loss", loss,
             prog_bar=True, logger=True, on_step=True, on_epoch=True,
@@ -179,9 +194,15 @@ class ScoreBasedModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         """"""
-        inputs = self.get_input(batch, self.image_key)
+        inputs, conditioning = self.get_input(
+            batch,
+            self.image_key,
+            cond_key=self.cond_key if self.class_conditional else None,
+        )
 
-        loss = self.loss(inputs, model=self.score_model, sde=self.sde)
+        loss = self.loss(
+            inputs, model=self.score_model, sde=self.sde, y=conditioning
+        )
         self.log("val/loss", loss)
         return loss
 
@@ -254,11 +275,13 @@ class ScoreBasedModel(pl.LightningModule):
             if self.ae_model is not None:
                 log["inputs"] = self.ae_model.get_input(batch, self.image_key)
             else:
-                log["inputs"] = self.get_input(batch, self.image_key)
+                log["inputs"], _ = self.get_input(batch, self.image_key)
 
         if "reconstructions" in to_log:
             if self.ae_model is not None:
-                x = self.get_input(batch, self.image_key, device=self.device)
+                x, _ = self.get_input(
+                    batch, self.image_key, device=self.device
+                )
                 xrec = self.ae_model.decode(x)
                 log["reconstructions"] = xrec
             else:
@@ -268,12 +291,17 @@ class ScoreBasedModel(pl.LightningModule):
 
         return log
 
-    def sample(self, num_samples=None, verbose=False, **kwargs):
+    def sample(
+        self, *, num_samples=None, class_idx=None, verbose=False, **kwargs
+    ):
         """Sample from the model.
 
         Args:
             num_samples: When logging samples, number of samples to create.
                 If not None, overwrites the ``shape`` sampling kwarg.
+            class_idx: Specifies the class to sample from if
+                self.class_conditional is True. If None, choose a class index
+                from a uniform distribution.
             verbose: If True, print verbose EMA info
             **kwargs: Passed to sde.sampling.get_sampling_fn
 
@@ -290,6 +318,8 @@ class ScoreBasedModel(pl.LightningModule):
 
         sampling_fn = get_sampling_fn(
             sde=self.sde,
+            class_conditional=self.class_conditional,
+            class_idx=class_idx,
             # TODO Automatically set `continuous` argument depending on ...
             #      loss type?
             # continuous=self.continuous,
@@ -305,7 +335,9 @@ class ScoreBasedModel(pl.LightningModule):
 
         return x
 
-    def _sampling_generator(self, num_samples=None, last_only=True, **kwargs):
+    def _sampling_generator(
+        self, *, num_samples=None, last_only=True, class_idx=None, **kwargs
+    ):
         """Sampling generator. Only for PC-sampling.
 
         Args:
@@ -313,6 +345,9 @@ class ScoreBasedModel(pl.LightningModule):
                 If not None, overwrites the ``shape`` sampling kwarg.
             last_only: If using a AE-model, only decodes the last sampling
                 stage, in order to speed up sampling.
+            class_idx: Specifies the class to sample from if
+                self.class_conditional is True. If None, choose a class index
+                from a uniform distribution.
             **kwargs: Passed to sde.sampling.get_sampling_fn
 
         Returns: Randomly generated sample
@@ -328,6 +363,8 @@ class ScoreBasedModel(pl.LightningModule):
 
         sampling_fn = get_sampling_fn(
             sde=self.sde,
+            class_conditional=self.class_conditional,
+            class_idx=class_idx,
             as_generator=True,
             **sampling_kwargs
         )

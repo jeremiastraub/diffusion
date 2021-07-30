@@ -88,7 +88,13 @@ def get_act(name: str):
 
 
 class NCSNpp(nn.Module):
-    """NCSN++ model"""
+    """UNet model for noise conditional score estimation.
+
+    Contains (BigGAN) residual blocks on each depth-level as well as
+    attention blocks for certain resolutions. The residual blocks are connected
+    via skip-connections. The embedded conditioning information is injected on
+    each depth-level.
+    """
     def __init__(
         self,
         *,
@@ -105,20 +111,59 @@ class NCSNpp(nn.Module):
         fourier_scale: float = 16.,
         resample_with_resblock: bool = True,
         resample_with_conv: bool = True,
+        use_adaptive_group_norm: bool = False,
         scale_by_sqrt2: bool = True,
         scale_output_by_sigma: bool = True,
         dropout: float = 0.,
+        num_classes: int = None,
         sigma_min: float = 0.01,
         sigma_max: float = 50,
         num_scales: int = 1000
     ):
-        """"""
+        """UNet NCSN.
+
+        Args:
+            in_channels: Number of channels of the input data
+            ch: Number of base channels
+            ch_mult: Chanel mutliplier for each depth-level
+            num_res_blocks: Number or residual blocks per depth-level and
+                (up/down) branch.
+            resolution: Input image resolution. Will be used to evaluate the
+                attention resolutions.
+            attn_resolutions: The resolutions for which attention is applied
+                after each residual block.
+            num_heads: Number of heads in the attention blocks. Ignored if
+                ``num_ch_per_head`` is given.
+            num_ch_per_head: Number of channels per attention head
+            nonlinearity: The type of activation function. May be:
+                elu, relu, leakyrelu, swish (silu)
+            embedding_type: Time embedding type. May be: positional, fourier
+            fourier_scale: Fourier scale used for Fourier-Embedding
+            resample_with_resblock: Whether to use residual blocks for up/down
+                sampling.
+            resample_with_conv: Whether to use learned convolutions for up/down
+                sampling. Ignored if ``resample_with_resblock`` is True.
+            use_adaptive_group_norm: Whether to use AdaGN to incorporate
+                conditioning information in residual blocks
+                [Dhariwal & Nichol, 2021].
+            scale_by_sqrt2: Whether to scale output of residual and attention
+                blocks by 1/sqrt(2).
+            scale_output_by_sigma: Whether to scale the UNet output by
+                1/sigma, with sigma being the conditional noise scale.
+            dropout: Dropout probability
+            num_classes: if specified, then this model will be
+                class-conditional with ``num_classes`` classes.
+            sigma_min: Minimum noise scale
+            sigma_max: Maximum noise scale
+            num_scales: Number of noise scales
+        """
         super().__init__()
         self.act = get_act(nonlinearity)
         self.scale_output_by_sigma = scale_output_by_sigma
         self.num_resolutions = len(ch_mult)
         self.num_res_blocks = num_res_blocks
         self.embedding_type = embedding_type
+        self.num_classes = num_classes
 
         # Time embedding and conditioning
         self.time_conditioning = nn.ModuleList()
@@ -150,15 +195,10 @@ class NCSNpp(nn.Module):
         self.time_conditioning.append(nn.Linear(embed_dim, 4 * ch))
         self.time_conditioning.append(self.act)
         self.time_conditioning.append(nn.Linear(4 * ch, 4 * ch))
-
-        # Use custom weights and bias initialization
-        # for i in [-1, -2]:
-        #     self.time_conditioning[i].weight.data = init_weights(
-        #         self.time_conditioning[i].weight.shape
-        #     )
-        #     nn.init.zeros_(self.time_conditioning[i].bias)
-
         self.time_conditioning = nn.Sequential(*self.time_conditioning)
+
+        if self.num_classes is not None:
+            self.label_emb = nn.Embedding(self.num_classes, 4 * ch)
 
         _AttnBlock = functools.partial(
             AttentionBlock,
@@ -171,6 +211,7 @@ class NCSNpp(nn.Module):
             act=self.act,
             emb_dim=4 * ch,
             dropout=dropout,
+            use_adaptive_group_norm=use_adaptive_group_norm,
             scale_by_sqrt2=scale_by_sqrt2,
         )
 
@@ -268,9 +309,25 @@ class NCSNpp(nn.Module):
             f"{in_channels} x {_lat_res} x {_lat_res} (C x H x W)"
         )
 
-    def forward(self, x, time_cond):
+    def forward(self, x, time_cond, y=None):
+        """Apply the score model to an input batch
+
+        Args:
+            x: Input batch of shape (B, C, H, W)
+            time_cond: time conditioning
+            y: (optional) conditioning information
+
+        Returns: Estimated score; same shape as the input data
+        """
+        assert (y is None) == (self.num_classes is None), (
+            "must specify y if and only if the model is class-conditional"
+        )
 
         emb = self.time_conditioning(time_cond)
+
+        if y is not None:
+            assert y.shape == (x.shape[0],)
+            emb = emb + self.label_emb(y)
 
         h = self.conv_in(x)
 

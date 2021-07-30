@@ -1,2 +1,2 @@
-from ncsnpp import *
-from ddpm import *
+from .ncsnpp import *
+from .ddpm import *
