@@ -1,0 +1,154 @@
+# data base configurations
+---
+LSUNchurch256:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.lsun.LSUNChurchesTrain
+      params:
+        data_root: church_outdoor
+        flip_p: 0.5
+        txt_file: church_outdoor_train.txt
+        interpolation: bicubic
+    validation:
+      target: diffusion.data.lsun.LSUNChurchesValidation
+      params:
+        data_root: church_outdoor
+        flip_p: 0.5
+        txt_file: church_outdoor_val.txt
+        interpolation: bicubic
+
+LSUNanimal256:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.lsun.LSUNAnimalTrain
+      params:
+        size: 256
+    validation:
+      target: diffusion.data.lsun.LSUNAnimalValidation
+      params:
+        size: 256
+
+LSUNanimalBalanced256:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.lsun.LSUNAnimalBalancedTrain
+      params:
+        size: 256
+    validation:
+      target: diffusion.data.lsun.LSUNAnimalValidation
+      params:
+        size: 256
+
+LSUNanimalBalancedsmall256:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.lsun.LSUNAnimalBalancedTrain
+      params:
+        subset_size: 250000
+        size: 256
+    validation:
+      target: diffusion.data.lsun.LSUNAnimalValidation
+      params:
+        size: 256
+
+LSUN7_256:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.lsun.LSUN7Train
+      params:
+        size: 256
+    validation:
+      target: diffusion.data.lsun.LSUN7Validation
+      params:
+        size: 256
+
+FacesHQ256:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.faceshq.FacesHQTrain
+      params:
+        size: 256
+    validation:
+      target: diffusion.data.faceshq.FacesHQValidation
+      params:
+        size: 256
+
+FFHQ256:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.faceshq.FFHQTrain
+      params:
+        size: 256
+    validation:
+      target: diffusion.data.faceshq.FFHQValidation
+      params:
+        size: 256
+
+CelebAHQ256:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.faceshq.CelebAHQTrain
+      params:
+        size: 256
+    validation:
+      target: diffusion.data.faceshq.CelebAHQValidation
+      params:
+        size: 256
+
+CIFAR10:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.cifar10.CIFAR10Train
+    validation:
+      target: diffusion.data.cifar10.CIFAR10Validation
+
+CIFAR3:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.cifar10.CIFARnTrain
+      params:
+        n: 3
+    validation:
+      target: diffusion.data.cifar10.CIFARnValidation
+      params:
+        n: 3
+
+MNIST:
+  target: cutlit.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: diffusion.data.mnist.MNISTTrain
+    validation:
+      target: diffusion.data.mnist.MNISTValidation

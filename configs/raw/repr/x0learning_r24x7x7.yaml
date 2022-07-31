@@ -1,0 +1,82 @@
+# class-conditional representation learning on MNIST
+---
+based_on:
+  data: data.MNIST
+  model.params.sde_config: sde_config.VPSDE
+  model.params.loss_config: loss_config.DDPMImageLoss
+
+lightning:
+  callbacks:
+    image_logger:
+      params:
+        batch_frequency: 4000 # scales with the inverse batch-size
+        use_exponential_steps: False
+        min_steps: 1
+        to_log: [] # ["samples"]
+
+data:
+  params:
+    batch_size: 128
+    num_workers: 128
+
+model:
+  base_learning_rate: 3.9e-7
+  target: diffusion.models.DiffusionModel
+  params:
+    diffusion_model_config:
+      target: diffusion.modules.diffusion_modules.DiffusionUNetReprCond
+      params:
+        in_channels: 1
+        ch: 32
+        ch_mult: [1, 2, 2]
+        num_res_blocks: 2
+        resolution: 28
+        attn_resolutions: [14, 7]
+        num_ch_per_head: 32
+        nonlinearity: swish
+        embedding_type: positional
+        use_adaptive_group_norm: True
+        scale_by_sqrt2: False
+        dropout: 0.1
+        repr_ch_mult: [1, 2, 2]
+        num_classes: 10
+
+    representation_ae_config:
+      target: diffusion.modules.representation_modules.RepresentationAE
+      params:
+        embed_dim: 24
+        enc_config:
+          target: diffusion.modules.representation_modules.RepresentationEncoder
+          params:
+            z_channels: 24
+            resolution: 28
+            in_channels: 1
+            ch: 32
+            ch_mult: [1, 2, 2]
+            num_res_blocks: 2
+            attn_resolutions: [14, 7]
+            num_classes: 10
+        dec_config:
+          target: diffusion.modules.representation_modules.RepresentationDecoder
+          params:
+            z_channels: 24
+            resolution: 28
+            ch: 32
+            ch_mult: [1, 2, 2]
+            num_res_blocks: 1
+            attn_resolutions: [14, 7]
+
+    continuous: False
+    n_batches_running_std: 100
+    representation_kl_weight: 1e-3
+    cond_key: class
+
+    sampling_kwargs:
+      sampling_method: pc
+      predictor: ddpm_x0_sampling
+      corrector: none
+      n_corrector_steps_each: 1
+      shape: [4, 1, 28, 28]
+      eps: 1e-5
+      snr: 0.05
+      denoise: True

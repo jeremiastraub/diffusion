@@ -1,0 +1,48 @@
+# autoencoder base configurations
+---
+kl_ae_64x64x3:
+  target: ldm.models.autoencoder.AutoencoderKL
+  params:
+    monitor: val/rec_loss
+    embed_dim: 3
+    lossconfig:
+      target: torch.nn.Identity
+    ddconfig:
+      double_z: true
+      z_channels: 3
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult:
+      - 1
+      - 2
+      - 4
+      num_res_blocks: 2
+      attn_resolutions: []
+      dropout: 0.0
+    ckpt_path: /export/data/rrombach/projects/braket/logs/2021-07-21T10-14-58_convae_openimages_64x64x3/checkpoints/last.ckpt
+
+vq_ae_64x64x3:
+  target: ldm.models.autoencoder.VQModelInterface
+  params:
+    embed_dim: 3
+    n_embed: 8192
+    monitor: val/rec_loss
+    ddconfig:
+      double_z: false
+      z_channels: 3
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult:
+      - 1
+      - 2
+      - 4
+      num_res_blocks: 2
+      attn_resolutions: []
+      dropout: 0.0
+    lossconfig:
+      target: torch.nn.Identity
+    ckpt_path: /export/data/rrombach/projects/braket/logs/2021-07-23T22-10-45_vqgan_f4_openimages_8192_z3/checkpoints/last.ckpt

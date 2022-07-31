@@ -1,0 +1,85 @@
+# t-LRDM on LSUN-Churches
+---
+based_on:
+  data: data.LSUNchurch256
+  model.params.ae_config: ae_config.vq_ae_64x64x3
+  model.params.sde_config: sde_config.VPSDE
+  model.params.loss_config: loss_config.DDPMImageLoss
+
+lightning:
+  callbacks:
+    image_logger:
+      params:
+        batch_frequency: 4000 # scales with the inverse batch-size
+        use_exponential_steps: False
+        min_steps: 1
+        to_log: [] # ["samples"]
+
+data:
+  params:
+    batch_size: 32
+    num_workers: 128
+
+model:
+  base_learning_rate: 3.9e-7
+  target: diffusion.models.DiffusionModel
+  params:
+    diffusion_model_config:
+      target: diffusion.modules.diffusion_modules.DiffusionUNetReprCond
+      params:
+        in_channels: 3
+        ch: 128
+        ch_mult: [1, 2, 4]
+        num_res_blocks: 2
+        resolution: 64
+        attn_resolutions: [32, 16]
+        num_ch_per_head: 64
+        nonlinearity: swish
+        embedding_type: positional
+        use_adaptive_group_norm: True
+        scale_by_sqrt2: False
+        dropout: 0.2
+        repr_ch_mult: [1, 2, 2]
+
+    representation_ae_config:
+      target: diffusion.modules.representation_modules.RepresentationAE
+      params:
+        embed_dim: 16
+        enc_config:
+          target: diffusion.modules.representation_modules.RepresentationEncoder
+          params:
+            z_channels: 16
+            resolution: 64
+            in_channels: 3
+            ch: 128
+            ch_mult: [1, 2, 2]
+            num_res_blocks: 4
+            attn_resolutions: [32, 16]
+            time_conditional: True
+            embedding_type: positional
+            dropout: 0.1
+        dec_config:
+          target: diffusion.modules.representation_modules.RepresentationDecoder
+          params:
+            z_channels: 16
+            resolution: 64
+            ch: 128
+            ch_mult: [1, 2, 2]
+            num_res_blocks: 2
+            attn_resolutions: [32, 16]
+            time_conditional: True
+            embedding_type: positional
+
+    continuous: False
+    n_batches_running_std: 100
+    representation_kl_weight: 1e-4
+
+    sampling_kwargs:
+      sampling_method: pc
+      predictor: ddpm_x0_sampling
+      corrector: none
+      n_corrector_steps_each: 1
+      shape: [4, 3, 64, 64]
+      eps: 1e-5
+      snr: 0.05
+      denoise: True

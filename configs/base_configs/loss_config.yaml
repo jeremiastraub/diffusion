@@ -1,0 +1,26 @@
+# Loss base configurations
+---
+SDELoss:
+  target: diffusion.modules.losses.sde_loss.SDELoss
+  params:
+    likelihood_weighting: False
+    reduce_mean: True
+
+DDPMNoiseLoss:
+  target: diffusion.modules.losses.DDPMNoiseLoss
+  params:
+    likelihood_weighting: False
+    reduce_mean: True
+
+DDPMMeanLoss:
+  target: diffusion.modules.losses.DDPMMeanLoss
+  params:
+    likelihood_weighting: False
+    reduce_mean: True
+
+DDPMImageLoss:
+  target: diffusion.modules.losses.DDPMImageLoss
+  params:
+    likelihood_weighting: False
+    reduce_mean: True
+

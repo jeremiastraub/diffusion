@@ -1,0 +1,22 @@
+# SDE base configurations
+---
+VESDE:
+  target: diffusion.modules.sde.VESDE
+  params:
+    sigma_min: 0.01
+    sigma_max: 50
+    N: 1000
+
+VPSDE:
+  target: diffusion.modules.sde.VPSDE
+  params:
+    beta_min: 0.1
+    beta_max: 20
+    N: 1000
+
+subVPSDE:
+  target: diffusion.modules.sde.subVPSDE
+  params:
+    beta_min: 0.1
+    beta_max: 20
+    N: 1000
