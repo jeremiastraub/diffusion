@@ -1,0 +1,21 @@
+name: diffusion
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - cudatoolkit=11.3.1
+  - pillow=8.4.0
+  - pip=21.2.4
+  - python=3.9.7
+  - pytorch=1.10.1
+  - pip:
+    - albumentations==1.1.0
+    - einops==0.4.1
+    - imageio==2.13.4
+    - imageio-ffmpeg==0.4.5
+    - omegaconf==2.0.6
+    - pytorch-lightning==1.2.4
+    - test-tube==0.7.5
+    - torch-fidelity==0.3.0
+    - -e git+https://github.com/CompVis/latent-diffusion.git@main#egg=latent-diffusion
+    - -e .
