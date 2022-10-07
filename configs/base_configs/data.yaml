@@ -1,7 +1,7 @@
 # data base configurations
 ---
 LSUNchurch256:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -21,7 +21,7 @@ LSUNchurch256:
         interpolation: bicubic
 
 LSUNanimal256:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -35,7 +35,7 @@ LSUNanimal256:
         size: 256
 
 LSUNanimalBalanced256:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -49,7 +49,7 @@ LSUNanimalBalanced256:
         size: 256
 
 LSUNanimalBalancedsmall256:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -64,7 +64,7 @@ LSUNanimalBalancedsmall256:
         size: 256
 
 LSUN7_256:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -78,7 +78,7 @@ LSUN7_256:
         size: 256
 
 FacesHQ256:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -92,7 +92,7 @@ FacesHQ256:
         size: 256
 
 FFHQ256:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -106,7 +106,7 @@ FFHQ256:
         size: 256
 
 CelebAHQ256:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -120,7 +120,7 @@ CelebAHQ256:
         size: 256
 
 CIFAR10:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -130,7 +130,7 @@ CIFAR10:
       target: diffusion.data.cifar10.CIFAR10Validation
 
 CIFAR3:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
@@ -144,7 +144,7 @@ CIFAR3:
         n: 3
 
 MNIST:
-  target: cutlit.DataModuleFromConfig
+  target: main.DataModuleFromConfig
   params:
     batch_size: 16
     num_workers: 8
