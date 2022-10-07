@@ -21,7 +21,7 @@ kl_ae_64x64x3:
       num_res_blocks: 2
       attn_resolutions: []
       dropout: 0.0
-    ckpt_path: /export/data/rrombach/projects/braket/logs/2021-07-21T10-14-58_convae_openimages_64x64x3/checkpoints/last.ckpt
+    ckpt_path: models/first_stage/kl_ae_64x64x3
 
 vq_ae_64x64x3:
   target: ldm.models.autoencoder.VQModelInterface
@@ -45,4 +45,4 @@ vq_ae_64x64x3:
       dropout: 0.0
     lossconfig:
       target: torch.nn.Identity
-    ckpt_path: /export/data/rrombach/projects/braket/logs/2021-07-23T22-10-45_vqgan_f4_openimages_8192_z3/checkpoints/last.ckpt
+    ckpt_path: models/first_stage/vq_ae_64x64x3
