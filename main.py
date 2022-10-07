@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, Dataset, Subset
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
 from pytorch_lightning.trainer import Trainer
-from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.callbacks import Callback, LearningRateMonitor
 from pytorch_lightning.utilities import rank_zero_info
 from pytorch_lightning.utilities.distributed import rank_zero_only
 from torch_fidelity import calculate_metrics
@@ -507,8 +507,8 @@ class FIDelity(Callback):
             keys (these are passed to the logging method as ``to_log``).
 
         Args:
-            data_cfg: cutlit.DataModuleFromConfig configuration. Passed to
-                cutlit.instantiate_from_config.
+            data_cfg: main.DataModuleFromConfig configuration. Passed to
+                main.instantiate_from_config.
             split: dset split to use, can be one of: train, validation, test.
             num_images: Number of images contained in the dataset configured by
                 ``data_cfg``. If < 0, the whole dataset split is used.
@@ -769,7 +769,7 @@ if __name__ == "__main__":
     #   params:
     #       key: value
     # data:
-    #   target: cutlit.DataModuleFromConfig
+    #   target: main.DataModuleFromConfig
     #   params:
     #      batch_size: int
     #      wrap: bool
@@ -801,8 +801,8 @@ if __name__ == "__main__":
     now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
     # add cwd for convenience and to make classes in this file available when
-    # running as `python cutlit.py`
-    # (in particular `cutlit.DataModuleFromConfig`)
+    # running as `python main.py`
+    # (in particular `main.DataModuleFromConfig`)
     sys.path.append(os.getcwd())
 
     parser = get_parser()
@@ -929,7 +929,7 @@ if __name__ == "__main__":
         # add callback which sets up log directory
         default_callbacks_cfg = {
             "setup_callback": {
-                "target": "cutlit.SetupCallback",
+                "target": "main.SetupCallback",
                 "params": {
                     "resume": opt.resume,
                     "now": now,
@@ -941,7 +941,7 @@ if __name__ == "__main__":
                 }
             },
             "image_logger": {
-                "target": "cutlit.ImageLogger",
+                "target": "main.ImageLogger",
                 "params": {
                     "batch_frequency": 750,
                     "max_images": 4,
@@ -949,14 +949,14 @@ if __name__ == "__main__":
                 }
             },
             "learning_rate_logger": {
-                "target": "cutlit.LearningRateMonitor",
+                "target": "main.LearningRateMonitor",
                 "params": {
                     "logging_interval": "step",
                     #"log_momentum": True
                 }
             },
             "cuda_callback": {
-                "target": "cutlit.CUDACallback"
+                "target": "main.CUDACallback"
             },
         }
         callbacks_cfg = lightning_config.callbacks or OmegaConf.create()
