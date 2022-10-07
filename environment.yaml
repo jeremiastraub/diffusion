@@ -17,5 +17,6 @@ dependencies:
     - pytorch-lightning==1.2.4
     - test-tube==0.7.5
     - torch-fidelity==0.3.0
+    - -e git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers
     - -e git+https://github.com/CompVis/latent-diffusion.git@main#egg=latent-diffusion
     - -e .

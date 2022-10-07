@@ -21,7 +21,7 @@ kl_ae_64x64x3:
       num_res_blocks: 2
       attn_resolutions: []
       dropout: 0.0
-    ckpt_path: models/first_stage/kl_ae_64x64x3
+    ckpt_path: models/first_stage/kl_ae_64x64x3.ckpt
 
 vq_ae_64x64x3:
   target: ldm.models.autoencoder.VQModelInterface
@@ -45,4 +45,4 @@ vq_ae_64x64x3:
       dropout: 0.0
     lossconfig:
       target: torch.nn.Identity
-    ckpt_path: models/first_stage/vq_ae_64x64x3
+    ckpt_path: models/first_stage/vq_ae_64x64x3.ckpt
