@@ -6,16 +6,13 @@ Checkout ``environment.yaml`` for suitable package versions or directly create a
 ```bash
 conda env create -f environment.yaml
 conda activate diffusion
+conda install pytorch==1.10.1 torchvision==0.11.2 torchaudio==0.10.1 cudatoolkit=11.3 -c pytorch -c conda-forge
 ```
-
-🚧 WIP – fix environment
 
 ## Pretrained Models
 For now, only the checkpoints for those LDMs, LRDMs, t-LRDMs trained on LSUN-Churches are available for download.
 
-You can download all checkpoints via [https://k00.fr/representationDM](https://k00.fr/representationDM). Note that the models trained in a reduced latent space also require the corresponding ``first_stage`` model.
-
-🚧 WIP – corresponding configs
+You can download all checkpoints via [https://k00.fr/representationDM](https://k00.fr/representationDM). The corresponding configuration files should be stored in the same directory as the model checkpoint. Note that the models trained in a reduced latent space also require the corresponding ``first_stage`` model.
 
 ### LDMs
 
