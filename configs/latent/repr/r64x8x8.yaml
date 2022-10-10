@@ -7,6 +7,8 @@ based_on:
   model.params.loss_config: loss_config.DDPMImageLoss
 
 lightning:
+  trainer:
+    accumulate_grad_batches: 8
   callbacks:
     image_logger:
       params:
