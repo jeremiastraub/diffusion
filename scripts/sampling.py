@@ -1,15 +1,14 @@
 """Evaluation script for sample generation.
 """
-import numpy as np
-import torch
+import argparse, os, sys, datetime, glob, logging
 
-import argparse, os, sys, datetime, glob
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
 
 from omegaconf import OmegaConf
 from main import instantiate_from_config, resolve_based_on
 from tqdm import tqdm
-
-import matplotlib.pyplot as plt
 
 # -----------------------------------------------------------------------------
 
@@ -136,9 +135,9 @@ def load_model(config, ckpt, gpu=True, eval_mode=True):
             pl_sd["state_dict"], strict=False
         )
         if missing:
-            print(f"Missing Keys in State Dict: {missing}")
+            logging.debug(f"Missing Keys in State Dict: {missing}")
         if unexpected:
-            print(f"Unexpected Keys in State Dict: {unexpected}")
+            logging.debug(f"Unexpected Keys in State Dict: {unexpected}")
 
     if gpu:
         model.cuda()
@@ -160,7 +159,7 @@ if __name__ == "__main__":
         if not os.path.exists(opt.resume):
             raise ValueError("Cannot find {}".format(opt.resume))
         if os.path.isfile(opt.resume):
-            paths = opt.resume.split("/")
+            paths = os.path.splitext(opt.resume)[0].split("/")
             try:
                 idx = len(paths)-paths[::-1].index("logs")+1
                 logdir = "/".join(paths[:idx])
@@ -169,10 +168,10 @@ if __name__ == "__main__":
                 )
             except ValueError:
                 assert "models" in paths, paths
-                idx = len(paths)-paths[::-1].index("models")+1
-                logdir = "logs/" + "/".join(paths[idx:])
+                idx = len(paths)-paths[::-1].index("models")
+                logdir = "logs/" + "_".join(paths[idx:])
                 base_configs = glob.glob(
-                    os.path.join(*paths[:-1], "/*-project.yaml")
+                    os.path.join(*paths[:-1], "*-project.yaml")
                 )
             ckpt = opt.resume
         else:
@@ -319,7 +318,9 @@ if __name__ == "__main__":
                 model_kwargs["y"] = classes[i]
 
             for n, (sample_step, estimate) in enumerate(
-                model.sampling_generator(denoise=False, last_only=False)
+                model.sampling_generator(
+                    denoise=False, last_only=False, num_samples=n_samples,
+                )
             ):
                 if n in progr_steps:
                     sample_progression.append(tensor_to_imshow(sample_step))
