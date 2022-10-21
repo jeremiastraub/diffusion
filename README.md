@@ -1,6 +1,8 @@
 # Representation Learning with (Latent) Diffusion Models
 This repository contains the code for the Master thesis "Representation Learning with Diffusion Models".
 
+[arXiv](https://arxiv.org/abs/2210.11058) | [BibTeX](#bibtex)
+
 <p align="center">
 <img src=assets/LRDM_overview.png width="500" />
 </p>
@@ -68,3 +70,18 @@ where ``<name>`` is a custom name of the corresponding log-directory (optional).
 
 ## Comments
 * The implementation is based on [https://github.com/openai/guided-diffusion](https://github.com/openai/guided-diffusion) and [https://github.com/yang-song/score_sde_pytorch](https://github.com/yang-song/score_sde_pytorch).
+
+## BibTex
+
+```
+@misc{https://doi.org/10.48550/arxiv.2210.11058,
+    doi = {10.48550/ARXIV.2210.11058},
+    url = {https://arxiv.org/abs/2210.11058},
+    author = {Traub, Jeremias},
+    keywords = {Computer Vision and Pattern Recognition (cs.CV), FOS: Computer and information sciences, FOS: Computer and information sciences},
+    title = {Representation Learning with Diffusion Models},
+    publisher = {arXiv},
+    year = {2022},
+    copyright = {arXiv.org perpetual, non-exclusive license}
+}
+```
